@@ -118,3 +118,5 @@ planning only. Runtime evidence gaps are not replaced with fabricated answers.
 22/22 independent unittest tests passed. The final full-dataset cold review attempted 518 requests, emitted 414 decisions and rejected 104 unresolved cases. A warm replay produced byte-identical partial predictions. All 414 emitted rows passed schema, order, citation-cutoff and provenance-locator validation. This is not a valid 518-row submission.
 
 The final safety review added ownership-conflict rejection and stopped inferring full tombstone redaction from a reference-only console. This increased review cases from 102 to 104, and reduced sample status matches from 23 to 22; the change avoids unsupported confident conclusions.
+
+The source ZIP was extracted into a fresh temporary directory with the original dataset supplied externally. All 22 tests passed there, a fresh OCR computation reproduced the same 414 partial rows byte-for-byte, and the normal CLI exited 2 without creating output.csv. Archive inspection found no dataset, environments, caches, nested archives or recognizable secret patterns.
