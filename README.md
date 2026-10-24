@@ -158,7 +158,7 @@ sequences at this build, with all fallback cases included in the denominator.
 - `output.csv`: all 518 rows, including 104 explicitly documented fallback predictions.
 - `code.zip`: runnable source archive and reports.
 - `code/evaluation/evaluation_report.md`: measured metrics and custom scenarios.
-- `code/evaluation/usage_report.md`: actual local OCR calls, zero API tokens/cost.
+- `code/evaluation/usage_report.md`: local OCR calls, reported API usage and unmetered failed attempts.
 - `log.txt`: authentic append-only coding-session summary; submit separately.
 - `docs/trace_collection.md`: collect `agent-trace.zip` after closing active sessions.
 - `docs/interview.md`: architecture, failures, costs and discussion questions.

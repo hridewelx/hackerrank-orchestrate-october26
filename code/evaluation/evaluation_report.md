@@ -125,10 +125,10 @@ remediation. Their exact reasons are retained in final_run.json. The validator
 explicitly recognizes only documented fallback rows; all other rows retain the
 strict step/citation checks. No resource IDs or evidence IDs were invented.
 
-All 26 regression tests passed, including fallback coverage, unchanged grounded
+At the preceding baseline milestone, all 26 regression tests passed, including fallback coverage, unchanged grounded
 and non-deletion predictions, extraction failures remaining fatal, strict output
 preservation, and dotenv environment precedence. Structural coverage and eligible
-citation provenance validation passed for the full output. No paid API was called.
+citation provenance validation passed for that full output. No API was called in that baseline run.
 
 ## OpenAI refinement of the 104 fallback cases
 

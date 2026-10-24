@@ -35,11 +35,11 @@ absence. A successful deletion workflow cannot discharge the replica.
 
 ## Measured choices and costs
 
-No paid API calls. RapidOCR 3.10.0 uses local PP-OCRv6 detector/recognizer and a local
-orientation classifier. A cold full-dataset review calls the OCR pipeline once for
-each of 11 images. Structured evidence is parsed once per run. No LLM token meter
-exists in this pipeline because no LLM is called. Electricity and hardware time
-are not claimed to be zero-cost merely because API cost is zero.
+The baseline used no hosted API. RapidOCR 3.10.0 uses local PP-OCRv6 detection,
+recognition and orientation classification; the cold full run processed 11 images.
+The OpenAI refinement now records reported tokens and costs, but both live attempts
+returned HTTP 429 without token usage. Known metered usage is zero; unreported
+usage and billing are unknown. Electricity and hardware costs are not estimated.
 
 ## Participant decisions actually made
 
