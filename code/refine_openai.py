@@ -153,6 +153,7 @@ def refine(root=ROOT,max_cost_usd=1.0,retry_provider_errors=False):
                 'entries':[],'output_sha256':sha(output),'max_cost_usd':max_cost_usd}
         save_json(journal,ledger)
     ledger['max_cost_usd']=max_cost_usd
+    if retry_provider_errors:ledger.pop('stop_reason',None)
     digest=dataset_digest(root)
     if ledger.get('dataset_sha256',digest)!=digest:raise AuditError('Participant evidence changed; refusing stale response reuse')
     ledger['dataset_sha256']=digest
