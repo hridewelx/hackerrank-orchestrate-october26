@@ -725,3 +725,5 @@ branch=codex/deletion-audit-agent
 repo_root=/home/hridewelx/HackerRank Orchestrate - October 2026
 worktree=/home/hridewelx/HackerRank Orchestrate - October 2026
 parent_agent=none
+
+Publication addendum: Five new source/output milestones were verified in the signed-in GitHub UI on codex/deletion-audit-agent, ending at 94b88302658a66434dd9eacd1bdaec747f7c7f49. The repository is now private; terminal fetch lacks GitHub credentials, so remote byte-for-byte comparison was unavailable. The browser confirms successful commits and root output.csv. Local output has 518 unique sorted rows and 104 documented fallbacks; .env remains ignored, untracked and excluded from code.zip.
