@@ -21,9 +21,17 @@ def validate(output,dataset,diagnostics,partial=False):
     manifest={r['file_id']:r['captured_at'] for r in read_csv(dataset/'evidence_files.csv')}
     manifest.update({r['activity_id']:r['event_time'] for r in read_csv(dataset/'system_activity.csv')})
     manifest.update({r['audit_id']:r['event_time'] for r in read_csv(dataset/'user_audit_log.csv')})
-    provenance={r['case_id']:r for r in json.loads(diagnostics.read_text())['cases']}
+    report=json.loads(diagnostics.read_text())
+    provenance={r['case_id']:r for r in report['cases']}
+    unresolved={r['case_id'] for r in report['errors']}
     for r in rows:
-        steps=json.loads(r['steps_json']);validate_steps(r['deletion_status'],steps)
+        steps=json.loads(r['steps_json'])
+        detail=provenance.get(r['case_id'],{})
+        if detail.get('fallback'):
+            if r['case_id'] not in unresolved or not detail.get('reason') or r['deletion_status']!='INCOMPLETE' or steps!=[]:
+                raise AuditError('Invalid conservative fallback')
+            continue
+        validate_steps(r['deletion_status'],steps)
         cutoff=timestamp(requests[r['case_id']]['audit_at'])
         sources=provenance.get(r['case_id'],{}).get('resources',[])
         for step in steps:
@@ -37,5 +45,6 @@ def validate(output,dataset,diagnostics,partial=False):
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,default=ROOT/'output.csv');p.add_argument('--dataset',type=Path,default=ROOT/'dataset');p.add_argument('--diagnostics',type=Path,default=ROOT/'evaluation_runs/final_run.json');p.add_argument('--partial',action='store_true');a=p.parse_args()
     n=validate(a.output,a.dataset,a.diagnostics,a.partial)
-    print(f'Validated {n} rows'+(' (partial review only)' if a.partial else ''))
+    fallbacks=json.loads(a.diagnostics.read_text()).get('fallback_count',0)
+    print(f'Validated {n} rows'+(' (partial review only)' if a.partial else '')+f'; {fallbacks} conservative fallback rows (not evidence-backed findings)')
 if __name__=='__main__':main()

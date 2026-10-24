@@ -57,7 +57,8 @@ def markdown(m,run_report):
 
 This is development evaluation, not an untouched hold-out. Public sample answers
 were read during architecture and parser development. Hidden evaluation answers
-were never accessed. Unresolved cases are counted as incorrect, not omitted.
+were never accessed. All cases are evaluated, including conservative fallback predictions.
+Fallback rows in this sample run: {run_report.get("fallback_count", 0)}.
 
 | Metric | Result |
 |---|---:|
@@ -132,7 +133,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--dataset',type=Path,default=ROOT/'dataset');p.add_argument('--predictions',type=Path);p.add_argument('--report',type=Path,default=ROOT/'code/evaluation/evaluation_report.md');args=p.parse_args()
     run_report={}
     if args.predictions:rows=read_csv(args.predictions)
-    else:rows,run_report=run(args.dataset,args.dataset/'sample_deletion_requests.csv',ROOT/'evaluation_runs/sample_predictions.csv',cache=ROOT/'.cache/ocr',diagnostics=ROOT/'evaluation_runs/sample_run.json',allow_errors=True)
+    else:rows,run_report=run(args.dataset,args.dataset/'sample_deletion_requests.csv',ROOT/'evaluation_runs/sample_predictions.csv',cache=ROOT/'.cache/ocr',diagnostics=ROOT/'evaluation_runs/sample_run.json',allow_errors=True,fallback=True)
     m=compare(rows,read_csv(args.dataset/'sample_output.csv'))
     args.report.parent.mkdir(parents=True,exist_ok=True);args.report.write_text(markdown(m,run_report))
     (ROOT/'evaluation_runs').mkdir(exist_ok=True);(ROOT/'evaluation_runs/sample_metrics.json').write_text(json.dumps(m,indent=2))

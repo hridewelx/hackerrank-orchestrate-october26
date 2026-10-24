@@ -8,11 +8,15 @@ import random
 import sys
 import tempfile
 import unittest
+import os
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from ghost_audit.schema import AuditError, read_csv, validate_steps
 from ghost_audit.ingest import EvidenceStore
 from ghost_audit.engine import Auditor
 from ghost_audit.intent import classify
+from main import run, load_environment
+from validate import validate
 
 T='2026-06-01T12:00:00Z';OLD='2026-05-01T12:00:00Z';FUTURE='2026-07-01T12:00:00Z'
 EMAIL='alice@example.test';USER='user_700001'
@@ -52,6 +56,40 @@ def audit(root,request=None):
 class AuditTests(unittest.TestCase):
     def setUp(self):self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
     def tearDown(self):self.temp.cleanup()
+
+    def test_fallback_preserves_coverage_without_inventing_evidence(self):
+        fixture(self.root,[])
+        output=self.root/'output.csv';diagnostics=self.root/'diagnostics.json'
+        rows,report=run(self.root,self.root/'deletion_requests.csv',output,images=False,diagnostics=diagnostics,fallback=True)
+        self.assertEqual(rows,[{'case_id':'case_900001','deletion_status':'INCOMPLETE','steps_json':'[]'}])
+        self.assertEqual(report['fallback_count'],1)
+        self.assertEqual(validate(output,self.root,diagnostics),1)
+        before=output.read_bytes()
+        with self.assertRaises(AuditError):run(self.root,self.root/'deletion_requests.csv',output,images=False)
+        self.assertEqual(output.read_bytes(),before)
+
+    def test_fallback_does_not_change_grounded_or_non_deletion_cases(self):
+        data,request=fixture(self.root)
+        other=dict(request,case_id='case_900002',request_text='Please export my data.')
+        data['deletion_requests.csv']=[other,request];fixture(self.root,extra=data)
+        rows,report=run(self.root,self.root/'deletion_requests.csv',self.root/'output.csv',images=False,fallback=True)
+        self.assertEqual([r['case_id'] for r in rows],['case_900001','case_900002'])
+        self.assertEqual([r['deletion_status'] for r in rows],['COMPLETE','NOT_APPLICABLE'])
+        self.assertEqual(report['fallback_count'],0)
+
+    def test_fallback_does_not_mask_extraction_failures(self):
+        fixture(self.root);(self.root/'evidence/observations.json').write_text('{"unknown":[]}')
+        with self.assertRaises(AuditError):run(self.root,self.root/'deletion_requests.csv',self.root/'output.csv',images=False,fallback=True)
+        self.assertFalse((self.root/'output.csv').exists())
+
+    def test_dotenv_loads_local_key_without_overwriting_environment(self):
+        (self.root/'.env').write_text('OPENAI_API_KEY=fictional-test-value\n')
+        with patch.dict(os.environ,{},clear=True):
+            load_environment(self.root)
+            self.assertEqual(os.environ['OPENAI_API_KEY'],'fictional-test-value')
+            os.environ['OPENAI_API_KEY']='environment-value'
+            load_environment(self.root)
+            self.assertEqual(os.environ['OPENAI_API_KEY'],'environment-value')
 
     def test_historical_identity_and_weak_decoy(self):
         old='former@example.test'

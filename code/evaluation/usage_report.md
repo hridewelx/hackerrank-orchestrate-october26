@@ -1,10 +1,10 @@
-# Usage report — local full-dataset review run
+# Usage report — final full-dataset run
 
-This is the final **review-mode** computation, not a successful final submission
-run: 414 of 518 cases produced decisions and 104
-were unresolved. No root output.csv was fabricated. All 518 requests were attempted.
-
-The participant selected local/free execution. No hosted API credentials were used.
+The final full-dataset run produced root `output.csv`: 518 of
+518 rows, including 104 conservative fallback rows
+(INCOMPLETE with empty steps). These fallback rows remain unproven. All cases
+were attempted. python-dotenv loaded local configuration; no credentials were
+printed, transmitted, or included in artifacts. No hosted API calls were made.
 
 | Provider / model | Calls | Input tokens | Output tokens | Total tokens | Estimated API cost |
 |---|---:|---:|---:|---:|---:|
@@ -22,11 +22,11 @@ metered. The pipeline's components are:
 - `PP-OCRv6_rec_small.onnx`; SHA-256 `6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884`.
 - `ch_ppocr_mobile_v2.0_cls_mobile.onnx`; SHA-256 `e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c`.
 
-Cold run: OCR cache bypassed; 11 image invocations, 0
-OCR cache hits, 43.159 seconds. Warm run: 0 image
-invocations, 11 cache hits, 9.462 seconds.
-Both read 94 evidence files and produce 3025
-typed observations. Partial prediction CSV bytes agree exactly on replay.
+Final cold run: OCR cache bypassed; 11 image invocations,
+0 cache hits, 44.208 seconds. Read 94
+evidence files and produced 3025 typed observations.
+Output SHA-256: `b2971b3c022f9bbda1b284d03b2320eff2d7df76deb7a713137ee067adc7f710`.
+The preceding strict/review build also demonstrated deterministic warm-cache replay.
 
 This demonstrates cached replay and deterministic planning/serialization. It is
 not a claim about independent generative-model determinism. There is no paid model

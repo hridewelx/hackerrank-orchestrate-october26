@@ -2,11 +2,12 @@
 
 This is development evaluation, not an untouched hold-out. Public sample answers
 were read during architecture and parser development. Hidden evaluation answers
-were never accessed. Unresolved cases are counted as incorrect, not omitted.
+were never accessed. All cases are evaluated, including conservative fallback predictions.
+Fallback rows in this sample run: 10.
 
 | Metric | Result |
 |---|---:|
-| Status accuracy | 22/32 (68.75%) |
+| Status accuracy | 23/32 (71.88%) |
 | Whole-case exact match | 8/32 (25.00%) |
 | Exact ordered sequence | 8/32 (25.00%) |
 | Exact-step precision | 109/140 (77.86%) |
@@ -39,8 +40,8 @@ Unresolved is an execution outcome, not a fourth submitted status.
 
 | Expected | COMPLETE | INCOMPLETE | NOT_APPLICABLE | Unresolved |
 |---|---:|---:|---:|---:|
-| COMPLETE | 1 | 0 | 0 | 9 |
-| INCOMPLETE | 0 | 21 | 0 | 1 |
+| COMPLETE | 1 | 9 | 0 | 0 |
+| INCOMPLETE | 0 | 22 | 0 | 0 |
 | NOT_APPLICABLE | 0 | 0 | 0 | 0 |
 
 The 32 public samples contain no NOT_APPLICABLE examples. Non-deletion coverage comes from independently authored fixtures.
@@ -49,29 +50,29 @@ The 32 public samples contain no NOT_APPLICABLE examples. Non-deletion coverage 
 
 | Case | Expected / actual | Expected / produced steps |
 |---|---|---:|
-| case_01 | COMPLETE / UNRESOLVED | 1 / 0 |
-| case_02 | COMPLETE / UNRESOLVED | 1 / 0 |
+| case_01 | COMPLETE / INCOMPLETE | 1 / 0 |
+| case_02 | COMPLETE / INCOMPLETE | 1 / 0 |
 | case_03 | COMPLETE / COMPLETE | 3 / 2 |
-| case_04 | COMPLETE / UNRESOLVED | 2 / 0 |
+| case_04 | COMPLETE / INCOMPLETE | 2 / 0 |
 | case_06 | INCOMPLETE / INCOMPLETE | 4 / 3 |
 | case_07 | INCOMPLETE / INCOMPLETE | 4 / 6 |
 | case_08 | INCOMPLETE / INCOMPLETE | 4 / 3 |
 | case_09 | INCOMPLETE / INCOMPLETE | 5 / 3 |
 | case_10 | INCOMPLETE / INCOMPLETE | 4 / 3 |
-| case_17 | INCOMPLETE / UNRESOLVED | 5 / 0 |
+| case_17 | INCOMPLETE / INCOMPLETE | 5 / 0 |
 | case_18 | INCOMPLETE / INCOMPLETE | 14 / 12 |
 | case_20 | INCOMPLETE / INCOMPLETE | 8 / 6 |
-| case_21 | COMPLETE / UNRESOLVED | 3 / 0 |
+| case_21 | COMPLETE / INCOMPLETE | 3 / 0 |
 | case_22 | INCOMPLETE / INCOMPLETE | 8 / 7 |
 | case_23 | INCOMPLETE / INCOMPLETE | 8 / 6 |
 | case_24 | INCOMPLETE / INCOMPLETE | 7 / 6 |
-| case_25 | COMPLETE / UNRESOLVED | 3 / 0 |
-| case_26 | COMPLETE / UNRESOLVED | 6 / 0 |
-| case_27 | COMPLETE / UNRESOLVED | 6 / 0 |
-| case_28 | COMPLETE / UNRESOLVED | 6 / 0 |
+| case_25 | COMPLETE / INCOMPLETE | 3 / 0 |
+| case_26 | COMPLETE / INCOMPLETE | 6 / 0 |
+| case_27 | COMPLETE / INCOMPLETE | 6 / 0 |
+| case_28 | COMPLETE / INCOMPLETE | 6 / 0 |
 | case_29 | INCOMPLETE / INCOMPLETE | 14 / 12 |
 | case_30 | INCOMPLETE / INCOMPLETE | 14 / 12 |
-| case_31 | COMPLETE / UNRESOLVED | 3 / 0 |
+| case_31 | COMPLETE / INCOMPLETE | 3 / 0 |
 | case_32 | INCOMPLETE / INCOMPLETE | 5 / 4 |
 
 ## Root causes and iteration
@@ -113,10 +114,18 @@ deterministic. No paid language-model comparison or independent generative-model
 stability claim is made. Warm-cache agreement measures replay and deterministic
 planning only. Runtime evidence gaps are not replaced with fabricated answers.
 
-## Final validation record
+## Final full-output validation
 
-22/22 independent unittest tests passed. The final full-dataset cold review attempted 518 requests, emitted 414 decisions and rejected 104 unresolved cases. A warm replay produced byte-identical partial predictions. All 414 emitted rows passed schema, order, citation-cutoff and provenance-locator validation. This is not a valid 518-row submission.
+The user authorized a conservative fallback for unresolved cases. The default
+CLI now produces 518 unique, lexically sorted rows: 457 INCOMPLETE, 51 COMPLETE,
+and 10 NOT_APPLICABLE. Of these, 104 INCOMPLETE rows contain empty steps because
+no safe complete evidence-backed plan was established. These are not proven
+violations; they do not fulfill the semantic requirement for findings and full
+remediation. Their exact reasons are retained in final_run.json. The validator
+explicitly recognizes only documented fallback rows; all other rows retain the
+strict step/citation checks. No resource IDs or evidence IDs were invented.
 
-The final safety review added ownership-conflict rejection and stopped inferring full tombstone redaction from a reference-only console. This increased review cases from 102 to 104, and reduced sample status matches from 23 to 22; the change avoids unsupported confident conclusions.
-
-The source ZIP was extracted into a fresh temporary directory with the original dataset supplied externally. All 22 tests passed there, a fresh OCR computation reproduced the same 414 partial rows byte-for-byte, and the normal CLI exited 2 without creating output.csv. Archive inspection found no dataset, environments, caches, nested archives or recognizable secret patterns.
+All 26 regression tests passed, including fallback coverage, unchanged grounded
+and non-deletion predictions, extraction failures remaining fatal, strict output
+preservation, and dotenv environment precedence. Structural coverage and eligible
+citation provenance validation passed for the full output. No paid API was called.

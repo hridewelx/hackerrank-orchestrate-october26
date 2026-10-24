@@ -8,8 +8,9 @@ historical changes, inspect resource histories, keep replicas separate, and appl
 the supplied policy. A deterministic planner emits only permitted steps. Local
 OCR reads screenshots. Unknown evidence and missing ownership links fail visibly.”
 
-Do not claim a fully working 518-case submission, hidden-test accuracy, a language
-model investigation loop, or perfect OCR. Those have not been demonstrated.
+The pipeline emits all 518 rows, but 104 are conservative INCOMPLETE/empty-step
+fallbacks, not proven findings. Do not claim all cases are solved, hidden-test
+accuracy, a language-model investigation loop, or perfect OCR.
 
 ## Difficult actual case
 

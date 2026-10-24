@@ -4,16 +4,21 @@ A local AI-assisted deletion-audit implementation with OCR, deterministic eviden
 parsing, historical identity resolution, temporal filtering, policy planning,
 strict serialization and reproducible evaluation. It never executes deletion.
 
-**Current status: development build, not submission-ready.** The supplied evidence
-permits this implementation to produce decisions for 414 of 518 evaluation
-requests; 104 require review. The normal run fails explicitly and does not write
-an incomplete `output.csv`. See [evaluation](code/evaluation/evaluation_report.md)
-and [evidence gaps](docs/evidence_gaps.md). No hidden accuracy is claimed.
+**Current status: 518-row output with explicit conservative fallbacks.**
+414 cases have engine decisions; 104 unresolved cases receive `INCOMPLETE` with
+`steps_json=[]`. These are unproven predictions, not evidence-backed findings or
+complete remediation plans. Reasons remain in `evaluation_runs/final_run.json`.
+See [evaluation](code/evaluation/evaluation_report.md) and
+[evidence gaps](docs/evidence_gaps.md). No hidden accuracy is claimed.
 
 ## Setup
 
 Python 3.11+ (tested on 3.14.8), Poppler's `pdftotext`, and the pinned Python
-packages are required. No API credentials or paid services are needed.
+packages are required. `python-dotenv` loads the repository-root `.env` into the
+process environment, preserving existing environment values. `OPENAI_API_KEY`
+can be configured there; it is never printed. `.env` is ignored and excluded
+from the source archive. The current pipeline makes no hosted API calls, even
+when a key is present; it does not require credentials or incur API spend.
 
 ```sh
 python3 -m venv .venv
@@ -40,15 +45,18 @@ so another working directory also works:
 ```
 
 - `main.py` reads `dataset/`, audits all requests, validates every emitted step,
-  and atomically writes root `output.csv` only when all cases resolve. Exit code
-  2 means unresolved evidence/intent. Per-case diagnostics are written under
-  `evaluation_runs/` before the failure is reported.
+  and atomically writes root `output.csv`, using `INCOMPLETE,[]` for unresolved
+  cases. `--strict` restores refusal to overwrite output on unresolved cases.
+  Extraction failures remain fatal. Per-case diagnostics identify every fallback.
+- `validate.py` checks coverage, schema and citation provenance. It accepts empty
+  INCOMPLETE steps only for documented fallback cases; this is not proof that
+  those predictions satisfy the challenge's semantic findings requirement.
 - `review.py` produces `evaluation_runs/review/partial_predictions.csv` plus
   `case_review.csv`, which lists every input case with explicit unresolved rows.
   **Neither is a valid 518-row submission.** Review mode cannot silently replace
   the root submission file.
-- `evaluation/main.py` recomputes public sample predictions, counts unresolved
-  cases as failures, and writes all metrics directly into its Markdown report.
+- `evaluation/main.py` recomputes public sample predictions, evaluates the same fallback
+  policy as the submission command, and writes all metrics directly into its Markdown report.
 - `package.py` writes `code.zip` from an explicit source/documentation allowlist.
   Dataset, caches, environments, secrets and nested archives are excluded.
 
@@ -101,15 +109,16 @@ captures. These are not filled using sample answers. Partial output may still
 miss anonymous resources or phone-only links; 414 emitted decisions do not mean
 414 independently verified correct answers.
 
-Twenty-two isolated regression checks cover historical identity, decoys, multilingual
+Twenty-six isolated regression checks cover historical identity, decoys, multilingual
 intent, prerequisites, cutoff leakage, replica drift, recreation, retention,
 tombstones, backups, hostile SQL, path traversal and input metamorphisms. Public
-sample evaluation is development evaluation: 22/32 status matches and 8/32 exact
-sequences at this build, with unresolved cases included in the denominator.
+sample evaluation is development evaluation: 23/32 status matches and 8/32 exact
+sequences at this build, with all fallback cases included in the denominator.
 
 ## Artifacts and interview
 
-- `code.zip`: source archive; currently a development deliverable.
+- `output.csv`: all 518 rows, including 104 explicitly documented fallback predictions.
+- `code.zip`: runnable source archive and reports.
 - `code/evaluation/evaluation_report.md`: measured metrics and custom scenarios.
 - `code/evaluation/usage_report.md`: actual local OCR calls, zero API tokens/cost.
 - `log.txt`: authentic append-only coding-session summary; submit separately.
