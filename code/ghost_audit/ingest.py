@@ -38,7 +38,7 @@ def has_pii(record, stable=False):
         if isinstance(v,dict) and has_pii(v,stable): return True
         if k in DIRECT_KEYS and v is not None and str(v).casefold() not in NULLS:return True
         if k in {'message_text','message_excerpt'} and any('@' in x for x in tokens(v)):return True
-        if stable and k in {'user_id','customer_reference','subject_reference'} and v:return True
+        if stable and k in {'user_id','customer_reference','subject_reference'} and v is not None and str(v).casefold() not in NULLS:return True
     return False
 
 def truth(v):return str(v).lower() in {'true','1','yes'}
@@ -58,6 +58,7 @@ class EvidenceStore:
         self.no_cache=no_cache;self.images=images
         self.observations=[];self.scopes=[];self.links=[];self.diagnostics=[];self.ocr_calls=0;self.ocr_cache_hits=0
         self.ocr_engine=None
+        self.document_text={}
         self.manifest=read_csv(self.dataset/'evidence_files.csv')
         self.activities=read_csv(self.dataset/'system_activity.csv')
         for m in self.manifest:
@@ -73,6 +74,28 @@ class EvidenceStore:
             else:raise AuditError(f'Unsupported evidence format: {p.suffix}')
         for a in self.activities:
             ids=tokens(a['details'])
+            # Catalog identity links are joined to the actual artifact label; a
+            # successful LINK event alone does not establish the object's state.
+            if a['event_type']=='LINK_RESOURCE_IDENTITY':
+                label=re.search(r'\(([^)]+)\)',a['details'])
+                if label:
+                    for m,text in self.document_text.values():
+                        if label[1] not in text:continue
+                        sys=a['target_system'];cat=None;state='PRESENT'
+                        if sys=='object_storage' and 'belongs only' in a['details']:cat='SUPPORT_ATTACHMENT'
+                        elif sys=='export_service':cat='USER_EXPORT'
+                        elif sys=='identity_service' and 'Retained reference' in text:
+                            self.diagnostics.append({'file':m['file_id'],'warning':'Reference-only screen does not prove redaction of underlying tombstone fields'})
+                            continue
+                        if cat:
+                            o=self.add(m,max(m['captured_at'],a['event_time']),sys,a['resource_id'],cat,state,{'catalog_subject':list(ids),'artifact_label':label[1]},'catalog-linked artifact label',limitations='Catalog links identity; artifact establishes presence')
+            if a['event_type'] in {'CHECK_DATA_FLOW','CHECK_RESTORE_ACCESS'}:
+                # These are explicit reads of configuration, unlike write SUCCESS.
+                state='ACTIVE';cat='DATA_FLOW' if a['event_type']=='CHECK_DATA_FLOW' else 'BACKUP_ARCHIVE'
+                marker='remains enabled' if cat=='DATA_FLOW' else 'can still be restored'
+                if marker in a['details']:
+                    m={'file_id':a['activity_id'],'file_path':'system_activity.csv','captured_at':a['event_time']}
+                    self.add(m,a['event_time'],a['target_system'],a['resource_id'],cat,state,a,'activity row')
             if ids:self.links.append((a['event_time'],a['event_time'],a['resource_id'],ids,a['activity_id']))
         self.by_identifier=defaultdict(list);self.by_resource=defaultdict(list)
         for o in self.observations:
@@ -110,6 +133,12 @@ class EvidenceStore:
 
     def sql(self,m,p):
         db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row
+        budget=[0]
+        def progress():
+            budget[0]+=1
+            return int(budget[0]>10000)
+        db.set_progress_handler(progress,1000)
+        if p.stat().st_size>16*1024*1024:raise AuditError('SQL evidence exceeds 16 MiB safety limit')
         # Explicitly deny attachment, extension loading, arbitrary pragmas, deletes,
         # virtual tables and triggers. The input is data, never executable authority.
         allowed={sqlite3.SQLITE_CREATE_TABLE,sqlite3.SQLITE_CREATE_INDEX,sqlite3.SQLITE_INSERT,sqlite3.SQLITE_UPDATE,sqlite3.SQLITE_READ,sqlite3.SQLITE_SELECT,sqlite3.SQLITE_TRANSACTION,sqlite3.SQLITE_FUNCTION,sqlite3.SQLITE_REINDEX}
@@ -148,7 +177,7 @@ class EvidenceStore:
                     self.add(m,time,sys,res,cat,state,{'subject_reference':subject},loc)
                 continue
             line=line.replace('\\"','"')
-            if ' message="' in line:line=line.replace(' message="',' ',1).rstrip('"')
+            if ' message="' in line:line=line.replace(' message="',' ',1)[:-1]
             kv={k:(a if a is not None and a!='' else b) for k,a,b in re.findall(r'(\w+)=(?:"([^"]*)"|([^\s]+))',line)}
             if line[21:].startswith('{'):kv=json.loads(line[21:])
             time=line[:20]
@@ -171,22 +200,23 @@ class EvidenceStore:
             if 'record_type' in kv:
                 self.add(m,time,kv['system'],res,kv['record_type'],kv['result'],kv,loc);continue
             state=cat=None
-            if event=='profile_lookup_completed':cat='USER_PROFILE';state='ABSENT' if kv.get('rows')=='0' and kv.get('http_status')=='404' else 'PRESENT'
+            if event=='profile_lookup_completed':cat='USER_PROFILE';state='ABSENT' if str(kv.get('rows'))=='0' and str(kv.get('http_status'))=='404' else 'PRESENT'
             elif event=='index_query_completed':cat='SEARCH_INDEX_ENTRY';state='PRESENT' if kv.get('result')=='hit' else 'ABSENT'
             elif event in {'message_pii_scan','message_read','message_read_completed','ticket_read_completed','support_ticket_read_completed'}:cat='SUPPORT_MESSAGE';state='IDENTIFIABLE' if event=='message_pii_scan' or has_pii(kv) else 'REDACTED'
             elif event=='attachment_pii_scan':cat='SUPPORT_ATTACHMENT';state='PRESENT'
-            elif event=='contact_lookup_completed':cat='SECONDARY_IDENTIFIER';state='PRESENT' if kv.get('rows')=='1' else 'ABSENT'
-            elif event in {'contact_query_completed'}:cat='SECONDARY_IDENTIFIER';state='PRESENT' if kv.get('rows')=='1' else 'ABSENT';sys='support_platform'
+            elif event=='contact_lookup_completed':cat='SECONDARY_IDENTIFIER';state='PRESENT' if str(kv.get('rows'))=='1' else 'ABSENT'
+            elif event in {'contact_query_completed'}:cat='SECONDARY_IDENTIFIER';state='PRESENT' if str(kv.get('rows'))=='1' else 'ABSENT';sys='support_platform'
             elif event in {'analytics_identity_scan','analytics_profile_read','analytics_profile_read_completed'}:cat='ANALYTICS_PROFILE';state='IDENTIFIABLE' if kv.get('direct_identifiers','0')!='0' or has_pii(kv,True) else 'ANONYMIZED'
             elif event in {'connector_heartbeat','connector_config_loaded','connector_config_read_completed'}:cat='DATA_FLOW';state='ACTIVE' if truth(kv.get('enabled')) else 'DISABLED'
             elif event in {'restore_candidate_evaluated','restore_authorization_completed','restore_entry_read_completed','restore_policy_read_completed'}:cat='BACKUP_ARCHIVE';state='BLOCKED' if kv.get('decision')=='deny' or truth(kv.get('deletion_block')) or kv.get('restore_allowed')=='false' else 'ACTIVE'
             elif event in {'export_download_check_completed','export_metadata_read_completed'}:cat='USER_EXPORT';state='PRESENT' if truth(kv.get('available')) else 'ABSENT'
-            elif event=='audit_record_read_completed':cat='SECURITY_AUDIT_LOG';state='PRESENT' if kv.get('rows')=='1' else 'ABSENT'
+            elif event=='audit_record_read_completed':cat='SECURITY_AUDIT_LOG';state='PRESENT' if str(kv.get('rows'))=='1' else 'ABSENT'
             if cat:self.add(m,time,sys,res,cat,state,kv,loc,scope='support_replica' if 'replica' in sys else 'service')
 
     def document(self,m,p):
         text=subprocess.check_output(['pdftotext','-layout',str(p),'-'],text=True,timeout=30)
         if not text.strip():raise AuditError(f'PDF lacks a text layer: {m["file_id"]}; OCR required')
+        self.document_text[m['file_id']]=(m,text)
         found=0
         for page_no,page in enumerate(text.split('\f'),1):
             for res in set(RESOURCE.findall(page)):
@@ -210,6 +240,7 @@ class EvidenceStore:
             extracted=[{'text':t,'confidence':float(c),'box':b.tolist()} for b,t,c in zip(result.boxes,result.txts,result.scores)]
             if cached:cached.parent.mkdir(parents=True,exist_ok=True);cached.write_text(json.dumps(extracted))
         text='\n'.join(x['text'] for x in extracted)
+        self.document_text[m['file_id']]=(m,text)
         # Interpret the visible main record header only. A sidebar reference alone
         # does not prove PII exposure in the referenced record.
         from PIL import Image
@@ -231,4 +262,22 @@ class EvidenceStore:
                 state='IDENTIFIABLE'
             if any(x['confidence']<0.7 for x in header if r in x['text']):raise AuditError(f'Low-confidence resource OCR: {m["file_id"]}')
             self.add(m,m['captured_at'],sys,r,cat,state,{'header':htext,'ocr_regions':header},'header region x>220,y<310',scope='console',limitations='OCR header; other screen regions retained in cache, not inferred as resource state');found+=1
+        rows=[]
+        for cell in sorted(extracted,key=lambda x:sum(p[1] for p in x['box'])/4):
+            x=sum(p[0] for p in cell['box'])/4;y=sum(p[1] for p in cell['box'])/4
+            if x<245 or x>width*0.78 or y<395:continue
+            if not rows or abs(rows[-1][0]-y)>10:rows.append((y,[]))
+            rows[-1][1].append(cell['text'])
+        for y,cells in rows:
+            row=' | '.join(cells);rs=set(RESOURCE.findall(row));row_ids=tokens(row)
+            if len(rs)!=1 or not row_ids:continue
+            r=next(iter(rs));prefix=next((k for k in mapping if r.startswith(k)),None)
+            if not prefix:continue
+            sys,cat=mapping[prefix]
+            if cat=='BACKUP_ARCHIVE':continue # Stored archive does not establish restore access.
+            state='ACTIVE' if cat=='DATA_FLOW' and 'Continuous' in row else 'PRESENT'
+            if cat=='DATA_FLOW' and state!='ACTIVE':continue
+            if cat in {'ANALYTICS_PROFILE','SUPPORT_MESSAGE'}:state='IDENTIFIABLE'
+            self.add(m,m['captured_at'],sys,r,cat,state,{'row':row},f'table row y={y:.1f}',scope='console',limitations='OCR table-row association')
+            found+=1
         self.diagnostics.append({'file':m['file_id'],'ocr_regions':len(extracted),'observations':found,'note':'All regions extracted; header-derived observations only'})

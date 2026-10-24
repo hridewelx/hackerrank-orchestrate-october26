@@ -31,6 +31,10 @@ class Auditor:
         for capture,event,res,linked,eid in self.store.links:
             if timestamp(capture)<=cutoff and timestamp(event)<=cutoff and linked & ids:resources.add(res)
         for res in sorted(resources):
+            eligible=[o for o in self.store.by_resource[res] if o.eligible(cutoff)]
+            concrete=[o for o in eligible if o.category in {'USER_PROFILE','MARKETING_PROFILE','ANALYTICS_PROFILE'} and o.identifiers and o.state not in {'ABSENT','ANONYMIZED'}]
+            if concrete and not any(o.identifiers & ids for o in eligible):
+                raise AuditError(f'Catalog ownership conflicts with artifact identifiers for {res}')
             observations.extend(o for o in self.store.by_resource[res] if o.eligible(cutoff))
         diagnostic['tool_calls'].append({'tool':'read_resource_history','resources':len(resources),'observations':len(observations)})
         # Complete SQL tables can establish absence only for already linked resources
@@ -40,6 +44,10 @@ class Auditor:
             if timestamp(scope.captured_at)>cutoff or timestamp(scope.observed_at)>cutoff:continue
             for res,(sys,cat) in known.items():
                 if sys!=scope.system or cat!=scope.category or res in scope.resources:continue
+                if cat not in {'USER_PROFILE','SEARCH_INDEX_ENTRY'}:continue
+                # Batch inventories are scoped captures, not a global list. A
+                # membership omission only discharges another copy in that capture.
+                if not any(o.resource==res and o.evidence_id==scope.evidence_id for o in observations):continue
                 # A snapshot before a resource's first grounded observation says
                 # nothing about the deletion outcome; it is not a post-deletion check.
                 first=min(timestamp(o.observed_at) for o in observations if o.resource==res)
