@@ -129,3 +129,38 @@ All 26 regression tests passed, including fallback coverage, unchanged grounded
 and non-deletion predictions, extraction failures remaining fatal, strict output
 preservation, and dotenv environment precedence. Structural coverage and eligible
 citation provenance validation passed for the full output. No paid API was called.
+
+## OpenAI refinement of the 104 fallback cases
+
+Only the original 104 fallback cases are eligible for hosted
+review. The other 414 rows are
+preserved exactly. Model: `gpt-4o-mini`. API attempts: 2; responses with
+reported token usage: 0; accepted replacements: 0; remaining
+empty fallbacks: 104; cases not yet attempted: 103.
+
+Proposals are checked for intent/status consistency, consecutive numbering,
+allowed operations/states, eligible citations, subject ownership, latest replica
+state, account coverage, retention policy, and complete remediation/verification
+coverage. Unsupported proposals are not inserted to make arrays nonempty.
+These are structural/grounding checks, not hidden-label accuracy measurements.
+
+No API calls are made for the 32 public sample cases, because the user restricted
+OpenAI to the 104 evaluation fallbacks. The sample metrics above measure the local
+baseline; no post-OpenAI sample accuracy or hidden accuracy is claimed.
+
+| Case | Outcome | Detail |
+|---|---|---|
+| case_103 | provider_error | OpenAI HTTP 429: quota or rate limit exceeded |
+| case_103 | provider_error | OpenAI HTTP 429: quota or rate limit exceeded |
+
+### Integration regression checks
+
+All 37 offline tests pass. New tests cover the fixed gpt-4o-mini model, strict
+response schema, cutoff exclusion, consecutive numbering, rejection of invented
+resources/citations, absent account-coverage proof, missing remediation, explicit
+insufficient-evidence responses, credential-safe errors, cached-token accounting,
+and exactly 104 targeted calls with no repeats on offline replay. These provider
+calls are mocked and excluded from actual API usage. Live execution made two
+failed attempts, neither yielding a completion or token usage. No successful
+live model behavior or semantic improvement is claimed. The existing 518-row
+output passed coverage and citation validation and is byte-identical to baseline.

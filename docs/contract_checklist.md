@@ -39,7 +39,7 @@ was inspected. Sample answers are used only by the evaluation command.
 | Identity-erased resources | Do not infer association from numeric ID suffixes or sample expected outputs |
 | Required retention | No deletion; missing required retained resource fails because the operation table supplies no repair operation |
 | Unknown evidence / extraction failure | Fail explicitly; do not synthesize a confident output |
-| AI | Locally executed RapidOCR detection/classification/recognition; no hosted LLM or paid API |
+| AI | Local RapidOCR baseline; explicit gpt-4o-mini refinement restricted to the original 104 fallbacks, with usage accounting and evidence validation |
 | Unresolved cases | User-authorized fallback emits INCOMPLETE with empty steps and a diagnostic reason; not an evidence-backed finding. `--strict` refuses output. Extraction failures remain fatal. `code/review.py` still produces partial review artifacts |
 | Transcripts | log.txt is append-only summary; agent-trace.zip is separate raw-session export after quitting Codex |
 

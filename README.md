@@ -17,8 +17,9 @@ Python 3.11+ (tested on 3.14.8), Poppler's `pdftotext`, and the pinned Python
 packages are required. `python-dotenv` loads the repository-root `.env` into the
 process environment, preserving existing environment values. `OPENAI_API_KEY`
 can be configured there; it is never printed. `.env` is ignored and excluded
-from the source archive. The current pipeline makes no hosted API calls, even
-when a key is present; it does not require credentials or incur API spend.
+from the source archive. The local baseline makes no hosted calls. The explicit
+OpenAI refinement command uses only `gpt-4o-mini` and requires a working API key
+and quota. No key or raw provider error is printed.
 
 ```sh
 python3 -m venv .venv
@@ -73,6 +74,42 @@ is cached by image bytes plus extractor/model configuration version. Structured
 files are parsed once per run, not once per request. `--no-images` is an ablation
 option and must never be treated as a final submission run.
 
+## OpenAI refinement (104 unresolved cases only)
+
+After generating the local baseline and its evaluation report, run:
+
+```sh
+.venv/bin/python code/refine_openai.py --max-cost-usd 1
+.venv/bin/python code/validate.py
+.venv/bin/python code/package.py
+```
+
+The command freezes the original 104 fallback IDs and preserves the other 414
+rows exactly. It submits eligible evidence and policy to `gpt-4o-mini` using strict
+JSON schema output. It normalizes step numbers and rejects unsupported citations,
+resource ownership, state claims and incomplete policy plans. An API cannot
+supply facts missing from the dataset; rejected proposals retain their fallback.
+Usage includes every attempt, reported input/output/cached tokens and estimated
+cost. No sample cases are sent to the API. Results and request hashes are cached
+under ignored `evaluation_runs/openai_refinement/`; `.env` is never cached.
+
+The first live run was blocked by HTTP 429 on two attempts; neither returned a
+completion or token usage. All 104 fallback rows therefore still remain. The
+provider response did not establish whether this is quota or temporary rate
+limiting. After resolving API access/quota, explicitly retry failed requests:
+
+```sh
+.venv/bin/python code/refine_openai.py --max-cost-usd 1 --retry-provider-errors
+.venv/bin/python code/validate.py
+.venv/bin/python code/package.py
+```
+
+Successful responses are not resent. Pending interrupted requests require review;
+there is no automatic retry. Do not rerun `main.py` after refinement unless you
+intend to restore the local baseline. The refinement refuses an externally
+changed output or changed evidence rather than overwriting it with cached data.
+A clean checkout can reproduce the workflow by running the baseline first.
+
 ## Architecture and tradeoffs
 
 1. **Ingest** manifest-referenced evidence only. JSON structures, six operational
@@ -96,9 +133,10 @@ option and must never be treated as a final submission run.
    complete-case checks cite sources; future actions/checks have empty citations.
 
 This favors an auditable small pipeline over a multi-agent framework. Local OCR
-adds measurable evidence extraction without API spend. Intent is a deliberately
-bounded multilingual rule baseline; unfamiliar or unresolved conditional requests
-fail for review. It is not a general multilingual language model.
+adds measurable evidence extraction without API spend. The local intent baseline
+uses bounded multilingual rules. The optional targeted OpenAI stage classifies
+intent and proposes steps for the original 104 fallbacks only; it is not used to
+silently manufacture evidence or change the already resolved cases.
 
 ## Evidence and evaluation limits
 
@@ -109,7 +147,7 @@ captures. These are not filled using sample answers. Partial output may still
 miss anonymous resources or phone-only links; 414 emitted decisions do not mean
 414 independently verified correct answers.
 
-Twenty-six isolated regression checks cover historical identity, decoys, multilingual
+Thirty-seven isolated regression checks cover historical identity, decoys, multilingual
 intent, prerequisites, cutoff leakage, replica drift, recreation, retention,
 tombstones, backups, hostile SQL, path traversal and input metamorphisms. Public
 sample evaluation is development evaluation: 23/32 status matches and 8/32 exact

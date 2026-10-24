@@ -65,3 +65,11 @@ Then discuss historical linkage, post-cutoff evidence, retention/tombstones,
 missing coverage, metric denominators, local OCR limitations, and the participant's
 actual decisions. Correct answers against the source; do not script invented
 ownership or results.
+
+## Targeted OpenAI integration
+
+Only the original 104 fallback requests are eligible for gpt-4o-mini. The other
+414 rows are preserved. Eligible evidence packets, structured responses, prompt
+hashes and token/cost records support reproducibility. The first two live API
+attempts returned HTTP 429, so there are no successful model completions and no
+accuracy improvement to claim. Retry after provider access/quota is available.

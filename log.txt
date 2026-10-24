@@ -727,3 +727,25 @@ worktree=/home/hridewelx/HackerRank Orchestrate - October 2026
 parent_agent=none
 
 Publication addendum: Five new source/output milestones were verified in the signed-in GitHub UI on codex/deletion-audit-agent, ending at 94b88302658a66434dd9eacd1bdaec747f7c7f49. The repository is now private; terminal fetch lacks GitHub credentials, so remote byte-for-byte comparison was unavailable. The browser confirms successful commits and root output.csv. Local output has 518 unique sorted rows and 104 documented fallbacks; .env remains ignored, untracked and excluded from code.zip.
+
+## [2026-10-24T17:03:16.381770+00:00] Targeted OpenAI refinement and provider rate/quota failure
+
+User Prompt (verbatim, secrets redacted):
+*please integrate the OpenAI API key from the `.env` file. Use `gpt-4o-mini` ONLY to resolve the 104 unresolved cases. For these cases, classify the intent and generate the required `steps_json` (with consecutive step numbers starting from 1). Replace the empty `[]` fallbacks in `output.csv` with these new steps. After that, update the evaluation and usage reports, and regenerate `code.zip`*
+
+Agent Response Summary:
+Integrated a fixed gpt-4o-mini structured-output stage for only the original 104 fallback cases; verified that the loaded credential matches .env without exposing it. Added bounded spending, explicit retries, immutable target IDs, response caching, token/cost accounting, evidence/policy validation and consecutive step numbering. Two live attempts returned HTTP 429 without a completion or usage; stopped rather than fabricating steps, leaving all 104 fallbacks and the other 414 rows unchanged. All 37 offline tests passed; updated evaluation and usage reports and regenerated code.zip. Provider access/quota must permit a successful response before predictions can be replaced.
+
+Actions:
+* Read official OpenAI model and structured-output documentation using the OpenAI Docs skill
+* Added openai_refiner.py, refine_openai.py and offline integration regression tests
+* Ran two authorized gpt-4o-mini requests under a $1 cap; both failed with HTTP 429
+* Validated 518-row output and regenerated the source archive with updated reports
+
+Context:
+tool=Codex Desktop
+model=gpt-6-astra
+branch=codex/deletion-audit-agent
+repo_root=/home/hridewelx/HackerRank Orchestrate - October 2026
+worktree=/home/hridewelx/HackerRank Orchestrate - October 2026
+parent_agent=none
