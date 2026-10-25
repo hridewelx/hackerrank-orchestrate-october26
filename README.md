@@ -196,9 +196,8 @@ exact sequences at this build, with all fallback cases included in the denominat
 The supplied diagnostic reports 0 formatting/ordering problems for the current
 output but counts one empty fallback, so this is not full semantic readiness. No
 hosted calls were made in this session. Earlier Groq usage is reported separately.
-Session artifacts are under the ignored `evaluation_runs/repair_session_*/`
-directories; the current session report is tracked at
-`docs/session_report_20261025.md`.
+The session report is tracked at `docs/session_report_20261025.md`; the full run
+logs and diagnostics are ignored and live under `evaluation_runs/repair_session_*/`.
 
 The archive includes reports at both `code/evaluation/` and `evaluation/` to
 satisfy the two documented layouts. The dataset remains external.
