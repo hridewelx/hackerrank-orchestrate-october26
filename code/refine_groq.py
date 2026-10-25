@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Review only the original 104 fallback rows with gpt-4o-mini; resumable."""
+"""Review only unresolved fallback rows with openai/gpt-oss-20b; resumable."""
 import argparse
 from collections import Counter
 import csv
@@ -11,12 +11,13 @@ import sys
 import time
 
 from main import ROOT, load_environment
+from ghost_audit.provenance import behavior_digest
 from ghost_audit.schema import AuditError, HEADER, read_csv
 from ghost_audit.ingest import EvidenceStore
 from ghost_audit.engine import Auditor
-from ghost_audit.openai_refiner import (
+from ghost_audit.groq_refiner import (
     MODEL, MAX_OUTPUT_TOKENS, INPUT_USD_PER_MILLION, OUTPUT_USD_PER_MILLION,
-    ProviderError, packet_for, request_body, fingerprint, call_openai, usage_of,
+    ProviderError, packet_for, request_body, fingerprint, call_groq, usage_of,
     validate_proposal)
 
 
@@ -56,15 +57,25 @@ def refresh_reports(root, ledger, report):
     attempted=sum(e.get('api_attempted',False) for e in entries)
     accepted=sum(e['outcome']=='accepted' for e in entries)
     not_attempted=len(set(ledger['target_ids'])-{e['case_id'] for e in entries})
-    mark='\n## OpenAI refinement of the 104 fallback cases\n'
+    completed=len({e['case_id'] for e in entries if e['outcome'] in {'accepted','rejected'}})
+    insufficient=sum(e.get('proposal',{}).get('resolved') is False for e in entries)
+    targets=len(ledger['target_ids'])
+    mark=f'\n## Groq refinement of the {targets} fallback cases\n'
     evaluation=root/'code/evaluation/evaluation_report.md'
-    text=evaluation.read_text().split(mark)[0]
+    text=evaluation.read_text().split('\n## OpenAI refinement of the 104 fallback cases\n')[0].split(mark)[0]
     text+=mark+f'''
-Only the original {len(ledger['target_ids'])} fallback cases are eligible for hosted
-review. The other {len(ledger['baseline_rows'])-len(ledger['target_ids'])} rows are
+Only the {targets} fallback cases are eligible for hosted
+review. The other {len(ledger['baseline_rows'])-targets} rows are
 preserved exactly. Model: `{MODEL}`. API attempts: {attempted}; responses with
 reported token usage: {success}; accepted replacements: {accepted}; remaining
 empty fallbacks: {report['fallback_count']}; cases not yet attempted: {not_attempted}.
+Cases with completed model responses: {completed}/{targets}. The model explicitly
+reported insufficient evidence (`resolved=false`) in {insufficient} responses.
+All {len(ledger['baseline_rows'])} case IDs remain unique and lexically sorted. Full step-contract resolution:
+{len(ledger['baseline_rows'])-report['fallback_count']}/{len(ledger['baseline_rows'])}; submission ready: **{str(report['fallback_count']==0).lower()}**.
+An empty INCOMPLETE fallback is a documented unresolved result, not a valid
+evidence-backed remediation plan. Successful API transport does not resolve
+missing evidence.
 
 Proposals are checked for intent/status consistency, consecutive numbering,
 allowed operations/states, eligible citations, subject ownership, latest replica
@@ -73,8 +84,8 @@ coverage. Unsupported proposals are not inserted to make arrays nonempty.
 These are structural/grounding checks, not hidden-label accuracy measurements.
 
 No API calls are made for the 32 public sample cases, because the user restricted
-OpenAI to the 104 evaluation fallbacks. The sample metrics above measure the local
-baseline; no post-OpenAI sample accuracy or hidden accuracy is claimed.
+Groq to the {targets} evaluation fallbacks. The sample metrics above measure the local
+baseline; no hosted-model sample accuracy or hidden accuracy is claimed.
 
 | Case | Outcome | Detail |
 |---|---|---|
@@ -85,35 +96,41 @@ baseline; no post-OpenAI sample accuracy or hidden accuracy is claimed.
     evaluation.write_text(text)
     usage_path=root/'code/evaluation/usage_report.md'
     baseline=ledger['baseline_diagnostics']
-    usage_path.write_text(f'''# Usage report — final output and OpenAI refinement
+    usage_path.write_text(f'''# Usage report — final output and Groq refinement
 
 `output.csv` contains {len(ledger['baseline_rows'])} rows; {accepted} fallback rows
 were replaced by validated model proposals, and {report['fallback_count']} empty
 fallbacks remain. Output SHA-256: `{sha(root/'output.csv')}`.
-Only the original 104 unresolved evaluation cases may be sent to the API.
+Only the {targets} unresolved evaluation cases may be sent to the API.
+This report covers the Groq run layered on the local baseline. Earlier OpenAI
+experiments had two HTTP 429 failures, no returned usage and no output changes;
+the Gemini and Groq credential smoke tests are separate development checks and
+are excluded from final-run totals. Failed historical billing is unknown.
 The key is loaded locally with python-dotenv and is never stored in reports,
 request caches, output, Git, or code.zip.
 
 | Provider/model | API attempts | Responses with usage | Input tokens | Cached input | Output tokens | Total tokens | Estimated known cost |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| OpenAI / {MODEL} | {attempted} | {success} | {usage['input_tokens']} | {usage['cached_input_tokens']} | {usage['output_tokens']} | {usage['total_tokens']} | ${usage['estimated_cost_usd']:.6f} |
+| Groq / {MODEL} | {attempted} | {success} | {usage['input_tokens']} | {usage['cached_input_tokens']} | {usage['output_tokens']} | {usage['total_tokens']} | ${usage['estimated_cost_usd']:.6f} |
 | Overall hosted totals | {attempted} | {success} | {usage['input_tokens']} | {usage['cached_input_tokens']} | {usage['output_tokens']} | {usage['total_tokens']} | ${usage['estimated_cost_usd']:.6f} |
 
-Across all 518 output requests: {usage['total_tokens']/518:.3f} reported tokens
-and ${usage['estimated_cost_usd']/518:.8f} known estimated API cost per request.
-Across the 104 targeted cases: {usage['total_tokens']/104:.3f} reported tokens and
-${usage['estimated_cost_usd']/104:.8f} known estimated cost per targeted case.
+Across all {len(ledger['baseline_rows'])} output requests: {usage['total_tokens']/len(ledger['baseline_rows']):.3f} reported tokens
+and ${usage['estimated_cost_usd']/len(ledger['baseline_rows']):.8f} known estimated API cost per request.
+Across the {targets} targeted cases: {usage['total_tokens']/targets:.3f} reported tokens and
+${usage['estimated_cost_usd']/targets:.8f} known estimated cost per targeted case.
 Calls that fail or are interrupted without usage cannot be assigned invented
 token counts or billed costs; {attempted-success} attempt(s) have no usage record.
 Recorded totals above exclude unknown usage and are not a billing reconciliation.
 
-Rates per million tokens: input $0.15, cached input $0.075, output $0.60.
-Source: [official gpt-4o-mini model documentation](https://developers.openai.com/api/docs/models/gpt-4o-mini),
-checked 2026-10-24. The runtime uses only the requested `gpt-4o-mini` alias;
+Published rates per million tokens: input $0.075, cached input $0.037, output $0.30.
+These are list-price estimates; free-tier billing may differ.
+Source: [official Groq model documentation](https://console.groq.com/docs/model/openai/gpt-oss-20b),
+checked 2026-10-24. The runtime uses only the requested `openai/gpt-oss-20b` alias;
 returned model identifiers are recorded per response in the local ledger.
 Run cap: ${ledger['max_cost_usd']:.2f}; max response tokens: {MAX_OUTPUT_TOKENS}.
-No automatic provider retries. Completed responses are cached; pending or failed
-calls are not silently retried, preventing duplicate untracked charges.
+Temporary 429 rate limits are retried up to five times using Retry-After
+(maximum 120 seconds per wait); every attempt is logged. Other failures require
+explicit retry. Completed responses are cached and never resent.
 
 The preceding local full run used {baseline.get('ocr_calls',0)} RapidOCR image
 invocations and {baseline.get('ocr_cache_hits',0)} OCR cache hits, producing
@@ -125,7 +142,7 @@ PP-OCRv6_det_small.onnx, PP-OCRv6_rec_small.onnx and
 ch_ppocr_mobile_v2.0_cls_mobile.onnx. Coding-assistant usage is separate and unknown.
 
 Baseline diagnostics, immutable target IDs, per-case prompt hashes, API response
-metadata, usage and rejection reasons are in evaluation_runs/openai_refinement/.
+metadata, usage and rejection reasons are in evaluation_runs/groq_refinement/.
 These local caches are excluded from code.zip.
 ''')
 
@@ -134,10 +151,11 @@ def refine(root=ROOT,max_cost_usd=1.0,retry_provider_errors=False):
     if not math.isfinite(max_cost_usd) or max_cost_usd<=0:raise AuditError('Budget must be positive and finite')
     load_environment(root)
     output=root/'output.csv';diag=root/'evaluation_runs/final_run.json'
-    directory=root/'evaluation_runs/openai_refinement';journal=directory/'ledger.json'
+    directory=root/'evaluation_runs/groq_refinement';journal=directory/'ledger.json'
     directory.mkdir(parents=True,exist_ok=True)
     if journal.exists():
         ledger=json.loads(journal.read_text())
+        if ledger.get('behavior_sha256')!=behavior_digest():raise AuditError('Refinement cache predates current evidence/prompt/schema/behavior; do not replay obsolete proposals')
         if ledger['model']!=MODEL:raise AuditError('Cached run uses a different model')
         if sha(output)!=ledger['output_sha256']:raise AuditError('Output changed outside this refinement; refusing to overwrite')
     else:
@@ -145,11 +163,13 @@ def refine(root=ROOT,max_cost_usd=1.0,retry_provider_errors=False):
         target_ids=sorted(d['case_id'] for d in diagnostics['cases'] if d.get('fallback'))
         requested_ids={r['case_id'] for r in read_csv(root/'dataset/deletion_requests.csv')}
         if len(rows)!=518 or {r['case_id'] for r in rows}!=requested_ids:raise AuditError('Baseline must contain exactly the 518 evaluation cases')
-        if len(target_ids)!=104 or len(set(target_ids))!=104:raise AuditError('Expected exactly 104 original fallback cases')
+        if not target_ids or len(target_ids)!=len(set(target_ids)):raise AuditError('Baseline diagnostics contain no unique unresolved fallback cases')
+        if {e['case_id'] for e in diagnostics.get('errors',[])}!=set(target_ids):
+            raise AuditError('Fallback diagnostics and error list disagree')
         by_id={r['case_id']:r for r in rows}
         if any(by_id[c]['deletion_status']!='INCOMPLETE' or json.loads(by_id[c]['steps_json'])!=[] for c in target_ids):
             raise AuditError('Target is not an empty INCOMPLETE fallback')
-        ledger={'model':MODEL,'target_ids':target_ids,'baseline_rows':rows,'baseline_diagnostics':diagnostics,
+        ledger={'behavior_sha256':behavior_digest(),'model':MODEL,'target_ids':target_ids,'baseline_rows':rows,'baseline_diagnostics':diagnostics,
                 'entries':[],'output_sha256':sha(output),'max_cost_usd':max_cost_usd}
         save_json(journal,ledger)
     ledger['max_cost_usd']=max_cost_usd
@@ -178,14 +198,31 @@ def refine(root=ROOT,max_cost_usd=1.0,retry_provider_errors=False):
         spent_or_reserved=sum(e.get('usage',{}).get('estimated_cost_usd',e.get('reserved_upper_cost_usd',0)) for e in ledger['entries'])
         if spent_or_reserved+upper>max_cost_usd:
             ledger['stop_reason']='Budget cap reached before next call';break
-        entry={'case_id':cid,'outcome':'pending','api_attempted':True,'prompt_sha256':fingerprint(body),'requested_model':MODEL,'reserved_upper_cost_usd':upper}
-        ledger['entries'].append(entry);save_json(directory/(cid+'_request.json'),body);save_json(journal,ledger)
-        start=time.perf_counter()
-        try:
-            response=call_openai(body)
-        except ProviderError as e:
-            entry.update(outcome='provider_error',provider_error=str(e));ledger['stop_reason']=str(e)
-            save_json(journal,ledger);print(str(e),flush=True);break
+        response=None
+        for retry in range(6):
+            reserved=sum(e.get('usage',{}).get('estimated_cost_usd',e.get('reserved_upper_cost_usd',0)) for e in ledger['entries'])
+            if reserved+upper>max_cost_usd:
+                ledger['stop_reason']='Budget cap reached before retry';break
+            entry={'case_id':cid,'outcome':'pending','api_attempted':True,'prompt_sha256':fingerprint(body),'requested_model':MODEL,'reserved_upper_cost_usd':upper}
+            ledger['entries'].append(entry);save_json(directory/(cid+'_request.json'),body);save_json(journal,ledger)
+            start=time.perf_counter()
+            try:
+                response=call_groq(body)
+                break
+            except ProviderError as e:
+                entry.update(outcome='provider_error',provider_error=str(e))
+                save_json(journal,ledger)
+                if e.retry_after is not None and retry<5 and e.retry_after<=120:
+                    print(f'{cid}: temporary rate limit; waiting {e.retry_after:.1f}s',flush=True)
+                    time.sleep(e.retry_after+1)
+                    continue
+                ledger['stop_reason']=str(e);print(str(e),flush=True);break
+        if response is None:
+            if 'json_validate_failed' in ledger.get('stop_reason',''):
+                ledger.pop('stop_reason',None)
+                print(f'{cid}: structured generation failed; preserving fallback and continuing',flush=True)
+                continue
+            break
         save_json(directory/(cid+'_response.json'),response)
         entry['response_model']=response.get('model');entry['response_id']=response.get('id')
         entry['elapsed_seconds']=round(time.perf_counter()-start,3)
@@ -200,7 +237,7 @@ def refine(root=ROOT,max_cost_usd=1.0,retry_provider_errors=False):
         except (AuditError,KeyError,TypeError,ValueError) as e:
             entry.update(outcome='rejected',validation_error=str(e))
         save_json(journal,ledger)
-        print(f"{len(ledger['entries'])}/104 {cid}: {entry['outcome']}; known cost ${totals(ledger['entries'])['estimated_cost_usd']:.5f}",flush=True)
+        print(f"{len({e['case_id'] for e in ledger['entries'] if e['outcome'] in {'accepted','rejected'}})}/{len(ledger['target_ids'])} {cid}: {entry['outcome']}; known cost ${totals(ledger['entries'])['estimated_cost_usd']:.5f}",flush=True)
     replacements={e['case_id']:e for e in ledger['entries'] if e['outcome']=='accepted'}
     final_rows=[replacements[r['case_id']]['replacement'] if r['case_id'] in replacements else r for r in ledger['baseline_rows']]
     # Assert the requested blast radius, including all 10 legitimate [] non-deletion rows.
@@ -208,21 +245,21 @@ def refine(root=ROOT,max_cost_usd=1.0,retry_provider_errors=False):
     report=json.loads(json.dumps(ledger['baseline_diagnostics']))
     report['cases']=[replacements[d['case_id']]['diagnostic'] if d['case_id'] in replacements else d for d in report['cases']]
     report['errors']=[e for e in report['errors'] if e['case_id'] not in replacements]
-    report['fallback_count']=104-len(replacements)
+    report['fallback_count']=len(ledger['target_ids'])-len(replacements)
     report['status_distribution']=dict(Counter(r['deletion_status'] for r in final_rows))
     report['operations']=dict(Counter(s['operation'] for r in final_rows for s in json.loads(r['steps_json'])))
     usage=totals(ledger['entries']);report.update(usage)
     report['llm_calls']=sum(e.get('api_attempted',False) for e in ledger['entries'])
-    report['api_cost_usd']=usage['estimated_cost_usd'];report['openai_model']=MODEL
+    report['api_cost_usd']=usage['estimated_cost_usd'];report.pop('openai_model',None);report['groq_model']=MODEL
     write_csv(output,final_rows);save_json(diag,report)
     ledger['output_sha256']=sha(output);save_json(journal,ledger)
     refresh_reports(root,ledger,report)
-    return {'targets':104,'api_attempts':report['llm_calls'],'accepted':len(replacements),'remaining_fallbacks':report['fallback_count'],**usage,'stop_reason':ledger.get('stop_reason')}
+    return {'targets':len(ledger['target_ids']),'api_attempts':report['llm_calls'],'accepted':len(replacements),'remaining_fallbacks':report['fallback_count'],**usage,'stop_reason':ledger.get('stop_reason')}
 
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--max-cost-usd',type=float,default=1.0)
+    p.add_argument('--max-cost-usd',type=float,required=True,help='Explicit approved API budget required; no default paid run')
     p.add_argument('--retry-provider-errors',action='store_true',help='Explicitly retry failed requests after correcting access/quota; completed responses are never repeated')
     a=p.parse_args()
     result=refine(max_cost_usd=a.max_cost_usd,retry_provider_errors=a.retry_provider_errors);print(json.dumps(result,indent=2))

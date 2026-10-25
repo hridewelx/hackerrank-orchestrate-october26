@@ -66,12 +66,15 @@ def validate_steps(status, steps):
     if not isinstance(steps,list): raise AuditError('Steps must be array')
     if status=='NOT_APPLICABLE' and steps: raise AuditError('Non-deletion has steps')
     if status=='COMPLETE' and not steps: raise AuditError('Completion requires proof')
-    if status=='INCOMPLETE' and not any(x['phase']=='FINDING' for x in steps): raise AuditError('Incomplete requires findings')
+    if any(not isinstance(s,dict) for s in steps):raise AuditError('Each step must be an object')
+    if status=='INCOMPLETE' and not any(x.get('phase')=='FINDING' for x in steps): raise AuditError('Incomplete requires findings')
     for i,s in enumerate(steps,1):
-        if set(s)!=set(FIELDS) or s['step_no']!=i: raise AuditError('Invalid step fields/number')
+        if set(s)!=set(FIELDS) or type(s['step_no']) is not int or s['step_no']!=i: raise AuditError('Invalid step fields/number')
+        if any(not isinstance(s[k],str) for k in FIELDS if k!='step_no'):raise AuditError('Step text fields must be strings')
         if s['phase'] not in OPERATIONS or (s['operation'],s['state']) not in OPERATIONS[s['phase']]: raise AuditError('Invalid operation/state')
         if not s['system_id'] or not s['resource_id']: raise AuditError('Missing resource')
         cited=s['phase']=='FINDING' or status=='COMPLETE'
         if bool(s['evidence_id']) != cited: raise AuditError('Invalid citation presence')
         if status=='COMPLETE' and s['phase']!='VERIFICATION': raise AuditError('Complete contains non-verification')
+    if len({tuple(s[k] for k in FIELDS if k!='step_no') for s in steps})!=len(steps):raise AuditError('Duplicate steps')
     if steps!=sorted(steps,key=step_key): raise AuditError('Noncanonical ordering')

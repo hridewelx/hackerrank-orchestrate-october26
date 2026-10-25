@@ -1,42 +1,69 @@
-# Usage report — final output and OpenAI refinement
+# Usage report — current full-dataset run and historical API responses
 
-`output.csv` contains 518 rows; 0 fallback rows
-were replaced by validated model proposals, and 104 empty
-fallbacks remain. Output SHA-256: `b2971b3c022f9bbda1b284d03b2320eff2d7df76deb7a713137ee067adc7f710`.
-Only the original 104 unresolved evaluation cases may be sent to the API.
-The key is loaded locally with python-dotenv and is never stored in reports,
-request caches, output, Git, or code.zip.
+## Current full-dataset run (no hosted calls)
 
-| Provider/model | API attempts | Responses with usage | Input tokens | Cached input | Output tokens | Total tokens | Estimated known cost |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| OpenAI / gpt-4o-mini | 2 | 0 | 0 | 0 | 0 | 0 | $0.000000 |
-| Overall hosted totals | 2 | 0 | 0 | 0 | 0 | 0 | $0.000000 |
+The current code was run over all 518 evaluation requests:
 
-Across all 518 output requests: 0.000 reported tokens
-and $0.00000000 known estimated API cost per request.
-Across the 104 targeted cases: 0.000 reported tokens and
-$0.00000000 known estimated cost per targeted case.
-Calls that fail or are interrupted without usage cannot be assigned invented
-token counts or billed costs; 2 attempt(s) have no usage record.
-Recorded totals above exclude unknown usage and are not a billing reconciliation.
+```sh
+.venv/bin/python code/main.py --allow-degraded --dataset dataset \
+  --output output.csv --diagnostics evaluation_runs/final_run.json
+```
 
-Rates per million tokens: input $0.15, cached input $0.075, output $0.60.
-Source: [official gpt-4o-mini model documentation](https://developers.openai.com/api/docs/models/gpt-4o-mini),
-checked 2026-10-24. The runtime uses only the requested `gpt-4o-mini` alias;
-returned model identifiers are recorded per response in the local ledger.
-Run cap: $1.00; max response tokens: 4096.
-No automatic provider retries. Completed responses are cached; pending or failed
-calls are not silently retried, preventing duplicate untracked charges.
+The run produced 518 unique, lexically sorted rows: 153 `COMPLETE`, 355
+`INCOMPLETE` and 10 `NOT_APPLICABLE`, with **1 unresolved `INCOMPLETE,[]`
+fallback** (`case_63`). Output SHA-256:
+`3c563f871040b1d9c225e7ed1693c420835195a2793bd1b549dc2c181772c844`.
+The run reports `submission_ready: false`; it is a best-effort answer, not a
+strict submission.
 
-The preceding local full run used 11 RapidOCR image
-invocations and 0 OCR cache hits, producing
-3025 observations from 94 files.
-The refinement's additional OCR invocations/cache hits are
-0/22. Local OCR has no API
-token billing; CPU/electricity costs are not estimated. Models remain
-PP-OCRv6_det_small.onnx, PP-OCRv6_rec_small.onnx and
-ch_ppocr_mobile_v2.0_cls_mobile.onnx. Coding-assistant usage is separate and unknown.
+| Provider/model | Calls | Input tokens | Output tokens | Total tokens | Estimated cost |
+|---|---:|---:|---:|---:|---:|
+| Hosted overall (none) | 0 | 0 | 0 | 0 | $0 |
 
-Baseline diagnostics, immutable target IDs, per-case prompt hashes, API response
-metadata, usage and rejection reasons are in evaluation_runs/openai_refinement/.
-These local caches are excluded from code.zip.
+Hosted averages across the 518 requests: 0 tokens and $0 per request.
+No provider usage is inferred from local prompt lengths or code execution.
+No historical Groq proposal was replayed into this run.
+
+Local RapidOCR models: `PP-OCRv6_det_small.onnx`, `PP-OCRv6_rec_small.onnx`,
+`ch_ppocr_mobile_v2.0_cls_mobile.onnx`. The full run used 0 fresh OCR
+invocations and 11 cache hits, producing 3030 observations from 94 evidence files
+in 2.209 seconds. The public-sample run used 0 fresh OCR invocations and 11 cache
+hits. Local inference has no provider token bill; electricity/hardware and
+coding-agent usage are not measured.
+
+The previous root artifact (SHA-256
+`b2971b3c022f9bbda1b284d03b2320eff2d7df76deb7a713137ee067adc7f710`, 104 fallbacks)
+is preserved at
+`evaluation_runs/repair_session_20261025T1100Z/output_before_allow_degraded.csv`.
+It was superseded by the current `--allow-degraded` run, which still cannot pass
+the strict gate while `case_63` is unresolved.
+
+## Historical Groq experiment (separate from this repair session)
+
+Recomputed directly from 104 original `*_response.json` files in
+`evaluation_runs/groq_refinement/`. These are historical measurements, not new
+calls, cache hits, or accepted replacements in the current run. The journal
+records 207 attempts; 103 attempts have no response usage and their tokens/billing
+remain unknown.
+
+| Provider/model | Responses with usage | Input (includes cached) | Cached input | Output | Total | Known estimated cost |
+|---|---:|---:|---:|---:|---:|---:|
+| Groq / `openai/gpt-oss-20b` | 104 | 154561 | 21504 | 37548 | 192109 | $0.022039323 |
+| Historical overall | 104 | 154561 | 21504 | 37548 | 192109 | $0.022039323 |
+
+Historical reported averages per 104 targeted requests: 1847.202 total tokens and
+$0.000211917. Across the 518-request dataset: 370.867 tokens and $0.000042547.
+Earlier OpenAI/Gemini credential or failed-generation experiments are not part of
+this run; absent usage responses are not assigned invented token counts.
+
+In this repair session the refiner was made target-count agnostic (it previously
+hardcoded exactly 104 fallbacks) and now rejects a diagnostics/error-list
+disagreement. It still requires an explicit `--max-cost-usd` budget and makes no
+call without `GROQ_API_KEY`. No new paid calls were made.
+
+Pricing: $0.075 per million uncached input tokens, $0.037 cached input, $0.30 output.
+Source: [Groq GPT OSS 20B documentation](https://console.groq.com/docs/model/openai/gpt-oss-20b),
+verified 2026-10-25. Cost = ((input-cached)*0.075 + cached*0.037 + output*0.30)/1,000,000.
+These are list-price estimates, not a bill; free-tier treatment and unmetered
+failures are excluded. Raw responses, request caches and credentials are excluded
+from `code.zip`. No key is included in this report.

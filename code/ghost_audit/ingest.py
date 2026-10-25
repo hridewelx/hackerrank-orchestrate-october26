@@ -33,13 +33,36 @@ SERVICE_COLLECTIONS={'profile_lookups':'customer_profiles','profiles':'customer_
 DIRECT_KEYS={'name','full_name','display_name','email','phone','email_hash','requester_name','requester_email','requester_phone','owner_email','owner_phone','customer_email'}
 NULLS={'','null','none','[redacted]','redacted','no direct identifier'}
 
-def has_pii(record, stable=False):
-    for k,v in record.items():
-        if isinstance(v,dict) and has_pii(v,stable): return True
-        if k in DIRECT_KEYS and v is not None and str(v).casefold() not in NULLS:return True
-        if k in {'message_text','message_excerpt'} and any('@' in x for x in tokens(v)):return True
-        if stable and k in {'user_id','customer_reference','subject_reference'} and v is not None and str(v).casefold() not in NULLS:return True
-    return False
+def has_pii(record, stable=False, aliases=None, subject=None):
+    """Detect prohibited content; this function never establishes ownership.
+
+    Query/linkage metadata is distinct from stored payload. Stable references are
+    permitted for redaction/tombstones, but not for anonymized analytics content.
+    """
+    aliases=aliases or {}
+    metadata={'resource_id','recorded_at','observed_at','trace_id','requestId','locator','system','service','record_type','result','event','catalog_subject','artifact_label','lookup_key','query','query_email','lookup_email'}
+    reference_keys={'user_id','customer_reference','subject_reference'}
+    def exposed(value,key=''):
+        if key in metadata:return False
+        if key in reference_keys:return stable and value is not None and str(value).casefold() not in NULLS
+        if isinstance(value,dict):return any(exposed(v,k) for k,v in value.items())
+        if isinstance(value,list):return any(exposed(v,key) for v in value)
+        if value is None or str(value).strip().casefold() in NULLS:return False
+        text=str(value);lower=text.casefold()
+        if key in DIRECT_KEYS:return True
+        strong=tokens(text)
+        if any('@' in item for item in strong):return True
+        known_hashes={h.lower() for h in aliases.get('email_hash',[])}
+        if strong & known_hashes:return True
+        if stable and any(re.fullmatch(r'user_\d+',v) for v in strong):return True
+        for name in aliases.get('name',[]):
+            if len(name.strip())>=3 and re.search(r'(?<!\w)'+re.escape(name.casefold())+r'(?!\w)',lower):return True
+        phones={re.sub(r'\D','',v) for v in aliases.get('phone',[])}
+        for candidate in re.findall(r'(?<!\d)\+?\d[\d ()-]{5,}\d(?!\d)',text):
+            number=re.sub(r'\D','',candidate)
+            if len(number)>=7 and number in phones:return True
+        return False
+    return exposed(record)
 
 def truth(v):return str(v).lower() in {'true','1','yes'}
 
@@ -59,6 +82,7 @@ class EvidenceStore:
         self.observations=[];self.scopes=[];self.links=[];self.diagnostics=[];self.ocr_calls=0;self.ocr_cache_hits=0
         self.ocr_engine=None
         self.document_text={}
+        self.document_header={}
         self.manifest=read_csv(self.dataset/'evidence_files.csv')
         self.activities=read_csv(self.dataset/'system_activity.csv')
         for m in self.manifest:
@@ -82,13 +106,18 @@ class EvidenceStore:
                     for m,text in self.document_text.values():
                         if label[1] not in text:continue
                         sys=a['target_system'];cat=None;state='PRESENT'
+                        extra={}
                         if sys=='object_storage' and 'belongs only' in a['details']:cat='SUPPORT_ATTACHMENT'
                         elif sys=='export_service':cat='USER_EXPORT'
                         elif sys=='identity_service' and 'Retained reference' in text:
-                            self.diagnostics.append({'file':m['file_id'],'warning':'Reference-only screen does not prove redaction of underlying tombstone fields'})
-                            continue
+                            # A retained-reference registry screen is the account
+                            # tombstone itself: the stable user key is permitted, while
+                            # any visible direct identifier still requires redaction.
+                            # Inspect the record header, not unrelated sidebar chrome.
+                            cat='ACCOUNT_TOMBSTONE';state='REDACTED'
+                            extra={'account_status':'DELETED','name':None,'email':None,'phone':None,'email_hash':None,'text':self.document_header.get(m['file_id'],text)}
                         if cat:
-                            o=self.add(m,max(m['captured_at'],a['event_time']),sys,a['resource_id'],cat,state,{'catalog_subject':list(ids),'artifact_label':label[1]},'catalog-linked artifact label',limitations='Catalog links identity; artifact establishes presence')
+                            o=self.add(m,max(m['captured_at'],a['event_time']),sys,a['resource_id'],cat,state,{'catalog_subject':list(ids),'artifact_label':label[1],**extra},'catalog-linked artifact label',limitations='Catalog links identity; artifact establishes presence' if not extra else 'Catalog links identity; retained-reference header establishes tombstone state')
             if a['event_type'] in {'CHECK_DATA_FLOW','CHECK_RESTORE_ACCESS'}:
                 # These are explicit reads of configuration, unlike write SUCCESS.
                 state='ACTIVE';cat='DATA_FLOW' if a['event_type']=='CHECK_DATA_FLOW' else 'BACKUP_ARCHIVE'
@@ -247,6 +276,7 @@ class EvidenceStore:
         width,height=Image.open(p).size
         header=[x for x in extracted if x['box'][0][1] < 310 and x['box'][0][0]>220]
         htext='\n'.join(x['text'] for x in header)
+        self.document_header[m['file_id']]=htext
         ids=tokens(htext);res=set(RESOURCE.findall(htext))
         mapping={'account_':('account_service','USER_PROFILE'),'marketing_':('marketing_platform','MARKETING_PROFILE'),'search_':('search_service','SEARCH_INDEX_ENTRY'),'export_':('export_service','USER_EXPORT'),'analytics_':('analytics_platform','ANALYTICS_PROFILE'),'data_flow_':('integration_service','DATA_FLOW'),'backup_':('backup_service','BACKUP_ARCHIVE'),'support_':('support_platform','SUPPORT_MESSAGE'),'audit_record_':('security_service','SECURITY_AUDIT_LOG')}
         found=0
@@ -274,7 +304,14 @@ class EvidenceStore:
             r=next(iter(rs));prefix=next((k for k in mapping if r.startswith(k)),None)
             if not prefix:continue
             sys,cat=mapping[prefix]
-            if cat=='BACKUP_ARCHIVE':continue # Stored archive does not establish restore access.
+            if cat=='BACKUP_ARCHIVE':
+                # The inventory row proves a stored archive and its account. It
+                # does not prove a restore grant, so an unmarked archive remains
+                # a blockable restore path rather than a completed deletion.
+                state='BLOCKED' if re.search(r'\b(blocked|denied|disabled|no restore)\b',row,re.I) else 'ACTIVE'
+                self.add(m,m['captured_at'],sys,r,cat,state,{'row':row},f'table row y={y:.1f}',scope='console',limitations='OCR table-row inventory; account-linked archive is an unblocked restore path unless the row states blocked')
+                found+=1
+                continue
             state='ACTIVE' if cat=='DATA_FLOW' and 'Continuous' in row else 'PRESENT'
             if cat=='DATA_FLOW' and state!='ACTIVE':continue
             if cat in {'ANALYTICS_PROFILE','SUPPORT_MESSAGE'}:state='IDENTIFIABLE'

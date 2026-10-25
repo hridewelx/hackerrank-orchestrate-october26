@@ -39,8 +39,8 @@ was inspected. Sample answers are used only by the evaluation command.
 | Identity-erased resources | Do not infer association from numeric ID suffixes or sample expected outputs |
 | Required retention | No deletion; missing required retained resource fails because the operation table supplies no repair operation |
 | Unknown evidence / extraction failure | Fail explicitly; do not synthesize a confident output |
-| AI | Local RapidOCR baseline; explicit gpt-4o-mini refinement restricted to the original 104 fallbacks, with usage accounting and evidence validation |
-| Unresolved cases | User-authorized fallback emits INCOMPLETE with empty steps and a diagnostic reason; not an evidence-backed finding. `--strict` refuses output. Extraction failures remain fatal. `code/review.py` still produces partial review artifacts |
+| AI | Local RapidOCR baseline; explicit Groq openai/gpt-oss-20b refinement restricted to the current unresolved fallbacks, with dynamic target count, usage accounting and evidence validation |
+| Unresolved cases | Strict default refuses output on unresolved cases. Explicit `--review` writes a separate review artifact; explicit `--allow-degraded` may write root `output.csv` as a best-effort answer, keeps unresolved rows as INCOMPLETE with empty steps, writes `degraded_cases.md`, and reports `submission_ready: false`. Neither is an evidence-backed finding. Extraction failures remain fatal. `code/review.py` still produces partial review artifacts |
 | Transcripts | log.txt is append-only summary; agent-trace.zip is separate raw-session export after quitting Codex |
 
 ## Official event check

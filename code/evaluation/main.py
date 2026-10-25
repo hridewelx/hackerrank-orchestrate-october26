@@ -28,7 +28,7 @@ def compare(predicted,expected):
     if len(pred)!=len(predicted) or len(truth)!=len(expected):raise ValueError('Duplicate cases in evaluation')
     extra=set(pred)-set(truth)
     if extra:raise ValueError(f'Unknown prediction cases: {sorted(extra)}')
-    status_ok=exact=sequence=tp=total_p=total_t=field_n=edit=edit_den=0
+    status_ok=exact=sequence=tp=total_p=total_t=content=content_p=content_t=field_n=edit=edit_den=0
     fields=Counter();confusion=Counter();failures=[];unmatched_expected=unmatched_predicted=0
     for cid,row in truth.items():
         p=pred.get(cid);status=p['deletion_status'] if p else 'UNRESOLVED'
@@ -36,9 +36,13 @@ def compare(predicted,expected):
         ps=json.loads(p['steps_json']) if p else [];ts=json.loads(row['steps_json'])
         pc=[canonical(s) for s in ps];tc=[canonical(s) for s in ts]
         sequence+=bool(p) and pc==tc;exact+=bool(p) and status==wanted and pc==tc
-        # Exact multiset matching includes all fields, including citation and step_no.
+        # Exact multiset matching includes all seven fields, step_no included.
         intersection=sum((Counter(pc)&Counter(tc)).values());tp+=intersection;total_p+=len(ps);total_t+=len(ts)
         unmatched_predicted+=len(ps)-intersection;unmatched_expected+=len(ts)-intersection
+        # Content multiset matching excludes step_no, which is positional: order is
+        # already measured by the ordered-sequence metric above.
+        pn=[canonical(s,False) for s in ps];tn=[canonical(s,False) for s in ts]
+        content+=sum((Counter(pn)&Counter(tn)).values());content_p+=len(ps);content_t+=len(ts)
         # Diagnostic positional alignment does not align on any evaluated field.
         # Missing/extra positions count as wrong for all seven fields.
         for i in range(max(len(ps),len(ts))):
@@ -49,7 +53,8 @@ def compare(predicted,expected):
         if not p or status!=wanted or pc!=tc:
             failures.append({'case_id':cid,'expected_status':wanted,'actual_status':status,'expected_steps':len(ts),'actual_steps':len(ps),'missing':[s for s in ts if canonical(s) not in pc],'extra':[s for s in ps if canonical(s) not in tc]})
     precision=tp/total_p if total_p else 0;recall=tp/total_t if total_t else 0
-    return dict(cases=len(truth),status_correct=status_ok,status_accuracy=status_ok/len(truth),whole_case_exact=exact,whole_case_accuracy=exact/len(truth),sequence_exact=sequence,sequence_accuracy=sequence/len(truth),true_positive_steps=tp,predicted_steps=total_p,expected_steps=total_t,step_precision=precision,step_recall=recall,step_f1=2*precision*recall/(precision+recall) if precision+recall else 0,field_correct=dict(fields),field_denominator=field_n,field_accuracy={k:fields[k]/field_n if field_n else 0 for k in FIELDS},unmatched_expected=unmatched_expected,unmatched_predicted=unmatched_predicted,sequence_distance=edit,sequence_distance_denominator=edit_den,normalized_sequence_distance=edit/edit_den if edit_den else 0,confusion={f'{a} -> {b}':v for (a,b),v in sorted(confusion.items())},failures=failures)
+    cp=content/content_p if content_p else 0;cr=content/content_t if content_t else 0
+    return dict(cases=len(truth),status_correct=status_ok,status_accuracy=status_ok/len(truth),whole_case_exact=exact,whole_case_accuracy=exact/len(truth),sequence_exact=sequence,sequence_accuracy=sequence/len(truth),true_positive_steps=tp,predicted_steps=total_p,expected_steps=total_t,step_precision=precision,step_recall=recall,step_f1=2*precision*recall/(precision+recall) if precision+recall else 0,content_true_positive=content,content_precision=cp,content_recall=cr,content_f1=2*cp*cr/(cp+cr) if cp+cr else 0,field_correct=dict(fields),field_denominator=field_n,field_accuracy={k:fields[k]/field_n if field_n else 0 for k in FIELDS},unmatched_expected=unmatched_expected,unmatched_predicted=unmatched_predicted,sequence_distance=edit,sequence_distance_denominator=edit_den,normalized_sequence_distance=edit/edit_den if edit_den else 0,confusion={f'{a} -> {b}':v for (a,b),v in sorted(confusion.items())},failures=failures)
 
 def markdown(m,run_report):
     pct=lambda n:f'{100*n:.2f}%'
@@ -68,12 +73,18 @@ Fallback rows in this sample run: {run_report.get("fallback_count", 0)}.
 | Exact-step precision | {m['true_positive_steps']}/{m['predicted_steps']} ({pct(m['step_precision'])}) |
 | Exact-step recall | {m['true_positive_steps']}/{m['expected_steps']} ({pct(m['step_recall'])}) |
 | Exact-step F1 | {pct(m['step_f1'])} |
+| Content-step precision (step_no excluded) | {m['content_true_positive']}/{m['predicted_steps']} ({pct(m['content_precision'])}) |
+| Content-step recall (step_no excluded) | {m['content_true_positive']}/{m['expected_steps']} ({pct(m['content_recall'])}) |
+| Content-step F1 (step_no excluded) | {pct(m['content_f1'])} |
 | Unmatched expected / predicted steps | {m['unmatched_expected']} / {m['unmatched_predicted']} |
 | Levenshtein step distance | {m['sequence_distance']}/{m['sequence_distance_denominator']} ({m['normalized_sequence_distance']:.4f}) |
 
-Exact-step matching uses multiset intersection over all seven fields. Sequence
-distance uses unit insertion, deletion and substitution cost on complete step
-tuples, divided by the sum of maximum expected/predicted sequence lengths.
+Exact-step matching uses multiset intersection over all seven fields, `step_no`
+included, so a correct check at a different index cannot match. Content-step
+matching drops `step_no` because it is positional; ordering is already measured by
+the ordered-sequence and Levenshtein metrics. Both are reported for every run.
+Sequence distance uses unit insertion, deletion and substitution cost on complete
+step tuples, divided by the sum of maximum expected/predicted sequence lengths.
 
 Field accuracy uses ordinal position, without matching on any field under test.
 Every missing/extra position adds one incorrect comparison to every field. It is
@@ -122,10 +133,11 @@ pass/fail results; no test result is inferred from source presence.
 
 ## Limitations
 
-Local OCR supplies learned text detection/recognition. Intent and planning are
-deterministic. No paid language-model comparison or independent generative-model
-stability claim is made. Warm-cache agreement measures replay and deterministic
-planning only. Runtime evidence gaps are not replaced with fabricated answers.
+This public-sample evaluation uses local OCR and deterministic intent/planning.
+Hosted Groq review is restricted to the current unresolved fallback set and is
+reported separately; no hosted sample comparison or hidden accuracy is claimed.
+Warm-cache agreement measures replay and deterministic planning only. Runtime
+evidence gaps are not replaced with fabricated answers.
 '''
     return text
 

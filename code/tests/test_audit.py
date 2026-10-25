@@ -11,7 +11,7 @@ import unittest
 import os
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from ghost_audit.schema import AuditError, read_csv, validate_steps
+from ghost_audit.schema import AuditError, read_csv, validate_steps, timestamp
 from ghost_audit.ingest import EvidenceStore
 from ghost_audit.engine import Auditor
 from ghost_audit.intent import classify
@@ -39,7 +39,7 @@ def fixture(root,records=None,extra=None):
     root.mkdir(exist_ok=True);(root/'evidence').mkdir(exist_ok=True)
     request=dict(case_id='case_900001',email=EMAIL,requested_at=OLD,reported_status='COMPLETE',reported_at=OLD,audit_at=T,request_text='Please delete my account.')
     rules=[]
-    for cat,action in [('USER_PROFILE','DELETE'),('SEARCH_INDEX_ENTRY','DELETE'),('SUPPORT_MESSAGE','REDACT'),('SUPPORT_ATTACHMENT','DELETE'),('ANALYTICS_PROFILE','ANONYMIZE'),('SECURITY_AUDIT_LOG','RETAIN'),('LEGAL_HOLD_RECORD','RETAIN'),('BACKUP_ARCHIVE','RETAIN'),('ACCOUNT_TOMBSTONE','REDACT'),('USER_EXPORT','DELETE')]:
+    for cat,action in [('USER_PROFILE','DELETE'),('SEARCH_INDEX_ENTRY','DELETE'),('SUPPORT_MESSAGE','REDACT'),('SUPPORT_ATTACHMENT','DELETE'),('ANALYTICS_PROFILE','ANONYMIZE'),('SECURITY_AUDIT_LOG','RETAIN'),('LEGAL_HOLD_RECORD','RETAIN'),('BACKUP_ARCHIVE','RETAIN'),('ACCOUNT_TOMBSTONE','REDACT'),('USER_EXPORT','DELETE'),('MARKETING_PROFILE','DELETE'),('CACHE_ENTRY','DELETE'),('EMAIL_DELIVERY_LOG','REDACT'),('PRODUCT_TELEMETRY','ANONYMIZE'),('SECONDARY_IDENTIFIER','DELETE')]:
         rules.append(dict(rule_id='rule_'+str(len(rules)+1),data_category=cat,condition='Synthetic policy fixture',required_action=action))
     data={'user_identities.csv':[identity()],'user_audit_log.csv':[],'system_activity.csv':[], 'deletion_requests.csv':[request],'deletion_rules.csv':rules,'evidence_files.csv':[dict(file_id='evidence_900001',file_path='evidence/observations.json',origin='synthetic_readbacks',captured_at=T)]}
     if extra:data.update(extra)
@@ -63,7 +63,8 @@ class AuditTests(unittest.TestCase):
         rows,report=run(self.root,self.root/'deletion_requests.csv',output,images=False,diagnostics=diagnostics,fallback=True)
         self.assertEqual(rows,[{'case_id':'case_900001','deletion_status':'INCOMPLETE','steps_json':'[]'}])
         self.assertEqual(report['fallback_count'],1)
-        self.assertEqual(validate(output,self.root,diagnostics),1)
+        with self.assertRaises(AuditError):validate(output,self.root,diagnostics)
+        self.assertEqual(validate(output,self.root,diagnostics,allow_degraded=True),1)
         before=output.read_bytes()
         with self.assertRaises(AuditError):run(self.root,self.root/'deletion_requests.csv',output,images=False)
         self.assertEqual(output.read_bytes(),before)
@@ -83,13 +84,13 @@ class AuditTests(unittest.TestCase):
         self.assertFalse((self.root/'output.csv').exists())
 
     def test_dotenv_loads_local_key_without_overwriting_environment(self):
-        (self.root/'.env').write_text('OPENAI_API_KEY=fictional-test-value\n')
+        (self.root/'.env').write_text('GROQ_API_KEY=fictional-test-value\n')
         with patch.dict(os.environ,{},clear=True):
             load_environment(self.root)
-            self.assertEqual(os.environ['OPENAI_API_KEY'],'fictional-test-value')
-            os.environ['OPENAI_API_KEY']='environment-value'
+            self.assertEqual(os.environ['GROQ_API_KEY'],'fictional-test-value')
+            os.environ['GROQ_API_KEY']='environment-value'
             load_environment(self.root)
-            self.assertEqual(os.environ['OPENAI_API_KEY'],'environment-value')
+            self.assertEqual(os.environ['GROQ_API_KEY'],'environment-value')
 
     def test_historical_identity_and_weak_decoy(self):
         old='former@example.test'
@@ -97,10 +98,67 @@ class AuditTests(unittest.TestCase):
         fixture(self.root,[record(subject=old),record('search_900001','SEARCH_INDEX_ENTRY','FOUND','decoy@example.test','search_service')],extra)
         status,steps,_=audit(self.root);self.assertEqual(status,'COMPLETE');self.assertEqual(len(steps),1)
 
+    def test_uppercase_and_whitespace_request_email_preserves_raw_sources(self):
+        data,request=fixture(self.root)
+        request['email']='  ALICE@EXAMPLE.TEST \t'
+        original=copy.deepcopy(data['user_identities.csv'])
+        status,_,detail=audit(self.root,request)
+        self.assertEqual(status,'COMPLETE')
+        self.assertEqual(detail['subject'],USER)
+        self.assertEqual(data['user_identities.csv'],original)
+        self.assertEqual(request['email'],'  ALICE@EXAMPLE.TEST \t')
+
+    def test_request_resolves_historical_old_email(self):
+        old='  Former@Example.Test '
+        history=[dict(audit_id='audit_900001',user_id=USER,event_time=OLD,field_name='email',old_value=old,new_value=EMAIL)]
+        _,request=fixture(self.root,[record(subject=EMAIL)],{'user_audit_log.csv':history})
+        request['email']='FORMER@example.test'
+        status,_,detail=audit(self.root,request)
+        self.assertEqual(status,'COMPLETE')
+        self.assertIn(old,detail['identity_aliases']['email'])
+
+    def test_multi_hop_expands_all_aliases_without_phone_only_links(self):
+        from ghost_audit.identity import IdentityIndex
+        first='first@example.test';middle='middle@example.test'
+        history=[]
+        for field,old,new in [('email',first,middle),('email',middle,EMAIL),('phone','+1 202 555 0101','+1 202 555 0102'),('phone','+1 202 555 0102','+1 202 555 0100'),('email_hash','a'*64,'b'*64)]:
+            history.append(dict(audit_id=f'audit_{len(history)}',user_id=USER,event_time=OLD,field_name=field,old_value=old,new_value=new))
+        _,request=fixture(self.root,[record(subject=first),record('search_900003','SEARCH_INDEX_ENTRY','FOUND','+1 202 555 0101','search_service')],{'user_audit_log.csv':list(reversed(history))})
+        request['email']=middle
+        status,steps,detail=audit(self.root,request)
+        self.assertEqual(status,'COMPLETE');self.assertEqual(len(steps),1)
+        aliases=detail['identity_aliases']
+        self.assertEqual(set(aliases['email']),{first,middle,EMAIL})
+        self.assertEqual(len(aliases['phone']),3)
+        self.assertTrue({'a'*64,'b'*64}<=set(aliases['email_hash']))
+        index=IdentityIndex([identity()],history)
+        with self.assertRaises(AuditError):index.resolve('+1 202 555 0101')
+        with self.assertRaises(AuditError):index.resolve('Fictional Test Subject')
+
+    def test_identity_after_request_before_audit_warns_but_does_not_gate(self):
+        # Replaces the old test endorsing a post-audit identity event. Only
+        # knowledge available by audit_at may establish historical ownership.
+        when='2026-05-15T12:00:00Z'
+        current=identity();current['updated_at']=when
+        history=[dict(audit_id='audit_900001',user_id=USER,event_time=when,field_name='email',old_value='former@example.test',new_value=EMAIL)]
+        _,request=fixture(self.root,[record(subject='former@example.test')],{'user_identities.csv':[current],'user_audit_log.csv':history})
+        with self.assertLogs('ghost_audit.engine',level='WARNING') as logs:
+            status,steps,detail=audit(self.root,request)
+        self.assertEqual(status,'COMPLETE');self.assertEqual(len(steps),1)
+        self.assertTrue(detail['identity_warnings']);self.assertIn('after requested_at',logs.output[0])
+        self.assertFalse(detail['warnings'])
+
+    def test_shared_historical_email_is_ambiguous_not_guessed(self):
+        from ghost_audit.identity import IdentityIndex
+        people=[identity(),identity('user_700002','another@example.test')]
+        history=[dict(audit_id=f'audit_{i}',user_id=p['user_id'],event_time=OLD,field_name='email',old_value='shared@example.test',new_value=p['email']) for i,p in enumerate(people)]
+        with self.assertRaisesRegex(AuditError,'2 subjects'):
+            IdentityIndex(people,history).at(' SHARED@example.test ',timestamp(T))
+
     def test_multilingual_and_negated_intents(self):
-        for text in ['Please do not delete my account.','No elimines mi cuenta.','Ne supprimez pas mon compte.','Please remove me from marketing lists only. I still want receipts for this account.','Could you export a copy of my account data?']:
+        for text in ['Please do not delete my account.','No elimines mi cuenta.', 'Não exclua minha conta.', 'Não apague meus dados.','Ne supprimez pas mon compte.','Please remove me from marketing lists only. I still want receipts for this account.','Could you export a copy of my account data?']:
             self.assertFalse(classify(text).authorized,text)
-        for text in ['Solicito la eliminación de mi cuenta.','Je demande la suppression de mon compte.','アカウントの削除を依頼します。','계정 삭제를 요청합니다.','Export my records, then delete my account.']:
+        for text in ['Solicito la eliminación de mi cuenta.','Je demande la suppression de mon compte.','Por favor, apague meus dados pessoais.', 'Solicito a exclusão permanente da conta.', 'Borra mis datos personales.', 'Effacez mes données personnelles.', '個人情報を消去してください。', '개인정보 삭제를 요청합니다.', 'アカウントの削除を依頼します。','계정 삭제를 요청합니다.','Export my records, then delete my account.']:
             self.assertTrue(classify(text).authorized,text)
 
     def test_conditional_authorization_requires_proof(self):
@@ -191,11 +249,15 @@ class AuditTests(unittest.TestCase):
         data,q=fixture(self.root);data['evidence_files.csv'][0]['file_path']='../outside.json';fixture(self.root,extra=data)
         with self.assertRaisesRegex(AuditError,'escapes'):audit(self.root)
 
-    def test_catalog_identity_conflict_is_not_ignored(self):
+    def test_catalog_identity_conflict_defers_to_artifact_content(self):
+        # The artifact names another person, so the catalog claim is overridden and
+        # recorded; the resource is never planned against and the case fails closed.
         data,q=fixture(self.root,[record(subject='someone_else@example.test',state='FOUND')])
         data['system_activity.csv']=[dict(activity_id='activity_900001',event_time=T,event_type='LINK_RESOURCE_IDENTITY',source_system='data_catalog',target_system='account_service',resource_id='account_812300',reported_result='SUCCESS',details='Linked account_812300 to alice@example.test')]
         fixture(self.root,[record(subject='someone_else@example.test',state='FOUND')],data)
-        with self.assertRaisesRegex(AuditError,'ownership conflicts'):audit(self.root)
+        with self.assertRaisesRegex(AuditError,'no grounded resources') as caught:audit(self.root)
+        overrides=caught.exception.diagnostic['ownership_overrides']
+        self.assertEqual([(o['resource'],o['artifact_identifiers']) for o in overrides],[('account_812300',['someone_else@example.test'])])
 
     def test_hypothetical_request_does_not_authorize(self):
         self.assertFalse(classify('What would happen if I deleted my account?').authorized)

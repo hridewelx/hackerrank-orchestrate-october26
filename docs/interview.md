@@ -4,13 +4,15 @@
 
 “I normalize participant evidence into records with source IDs, locators, capture
 and observation times. I connect identities through strong identifiers and
-historical changes, inspect resource histories, keep replicas separate, and apply
+all historical changes, inspect resource histories, keep replicas separate, and apply
 the supplied policy. A deterministic planner emits only permitted steps. Local
 OCR reads screenshots. Unknown evidence and missing ownership links fail visibly.”
 
-The pipeline emits all 518 rows, but 104 are conservative INCOMPLETE/empty-step
-fallbacks, not proven findings. Do not claim all cases are solved, hidden-test
-accuracy, a language-model investigation loop, or perfect OCR.
+The pipeline now resolves 517 of 518 rows without a fallback. One case (`case_63`)
+is a conservative INCOMPLETE/empty-step fallback after the catalog claim is
+overridden by the observed artifact, not a proven finding. Do not claim all cases
+are solved, hidden-test accuracy, a language-model investigation loop, or perfect
+OCR.
 
 ## Difficult actual case
 
@@ -30,16 +32,28 @@ absence. A successful deletion workflow cannot discharge the replica.
   now has a regression test.
 - Broad snapshot omissions implied missing retained records. Scope restriction
   prevents a partial batch from masquerading as a global inventory.
+- A fail-closed coverage guard produced 97 empty answers even when every linked
+  record was already compliant. Completion is now asserted from exact-key-linked,
+  already-treated records, with the waiver recorded in diagnostics.
+- A catalog link that contradicted the artifact it pointed at blocked a whole case.
+  Observed artifact content now outranks the catalog row, and the override is
+  recorded instead of being hidden.
 - Remaining failures include unlinked erased resources. This is documented rather
   than solved through numeric suffix guessing or sample-label lookup.
+- The sample gate is reported with two step metrics. Positional F1 includes
+  `step_no`; content F1 excludes it. The coverage waiver improved status accuracy
+  (24/32 to 29/32) and content F1 (84.21% to 88.76%) while positional F1 fell
+  (65.50% to 62.92%), because missing earlier steps shift every later index.
 
 ## Measured choices and costs
 
 The baseline used no hosted API. RapidOCR 3.10.0 uses local PP-OCRv6 detection,
-recognition and orientation classification; the cold full run processed 11 images.
-The OpenAI refinement now records reported tokens and costs, but both live attempts
-returned HTTP 429 without token usage. Known metered usage is zero; unreported
-usage and billing are unknown. Electricity and hardware costs are not estimated.
+recognition and orientation classification; the historical cold full run processed
+11 images, and the current review reused 11 cached OCR results.
+Groq refinement records attempts, reported input/output/cached tokens and estimated
+cost in `code/evaluation/usage_report.md`. Provider failures without usage are
+reported separately, not assigned invented token counts. Earlier OpenAI attempts
+failed and contributed no output. Electricity and hardware costs are not estimated.
 
 ## Participant decisions actually made
 
@@ -66,10 +80,12 @@ missing coverage, metric denominators, local OCR limitations, and the participan
 actual decisions. Correct answers against the source; do not script invented
 ownership or results.
 
-## Targeted OpenAI integration
+## Targeted Groq integration
 
-Only the original 104 fallback requests are eligible for gpt-4o-mini. The other
-414 rows are preserved. Eligible evidence packets, structured responses, prompt
-hashes and token/cost records support reproducibility. The first two live API
-attempts returned HTTP 429, so there are no successful model completions and no
-accuracy improvement to claim. Retry after provider access/quota is available.
+Only the current unresolved fallback requests are eligible for `openai/gpt-oss-20b`
+on Groq. All other rows are preserved. The target count is derived from diagnostics,
+not hardcoded. Eligible evidence packets, strict JSON schema, local evidence
+validation, prompt hashes, token/cost records and resumable rate-limit handling
+support reproducibility. Missing evidence remains unresolved; refer to the
+evaluation report for the actual accepted/rejected counts. No new paid calls were
+made in the 2026-10-25 repair session.

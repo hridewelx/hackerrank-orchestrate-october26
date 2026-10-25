@@ -13,12 +13,32 @@ from test_audit import fixture, record, T, FUTURE, audit
 from ghost_audit.schema import AuditError, read_csv
 from ghost_audit.ingest import EvidenceStore
 from ghost_audit.engine import Auditor
-from ghost_audit.openai_refiner import (
-    MODEL, packet_for, request_body, validate_proposal, call_openai, ProviderError, usage_of)
-from refine_openai import refine
+from ghost_audit.groq_refiner import (
+    MODEL, packet_for, request_body, validate_proposal, call_groq, ProviderError, usage_of)
+from refine_groq import refine
 
 
-class OpenAIRefinerTests(unittest.TestCase):
+def build_refinement_project(root, fallback_count):
+    """Synthetic 518-row project with a configurable unresolved fallback set."""
+    data=root/'dataset';data.mkdir(parents=True)
+    _,q=fixture(data)
+    ids=[f'case_{i:04}' for i in range(518)];rows=[];details=[];requests=[]
+    for i,cid in enumerate(ids):
+        requests.append(dict(q,case_id=cid))
+        rows.append(dict(case_id=cid,deletion_status='INCOMPLETE' if i<fallback_count else 'NOT_APPLICABLE',steps_json='[]'))
+        details.append(dict(case_id=cid,fallback=i<fallback_count,reason='test missing link',resources=[]))
+    import csv
+    for path,records in [(data/'deletion_requests.csv',requests),(root/'output.csv',rows)]:
+        with path.open('w',newline='') as f:
+            w=csv.DictWriter(f,fieldnames=list(records[0]));w.writeheader();w.writerows(records)
+    (root/'evaluation_runs').mkdir()
+    (root/'evaluation_runs/final_run.json').write_text(json.dumps({'cases':details,'errors':[{'case_id':cid,'error':'test'} for cid in ids[:fallback_count]],'fallback_count':fallback_count}))
+    (root/'code/evaluation').mkdir(parents=True)
+    (root/'code/evaluation/evaluation_report.md').write_text('Baseline evaluation\n')
+    return ids,rows
+
+
+class GroqRefinerTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
         _,self.request=fixture(self.root)
@@ -37,11 +57,12 @@ class OpenAIRefinerTests(unittest.TestCase):
     def test_model_is_fixed_and_request_is_structured(self):
         packet,_=packet_for(self.engine,self.request,'test')
         body=request_body(packet)
-        self.assertEqual(body['model'],'gpt-4o-mini')
+        self.assertEqual(body['model'],'openai/gpt-oss-20b')
         self.assertTrue(body['response_format']['json_schema']['strict'])
-        self.assertFalse(body['store'])
-        self.assertNotIn('OPENAI_API_KEY',json.dumps(body))
-        with self.assertRaises(AuditError):call_openai({'model':'other-model'})
+        self.assertEqual(body['reasoning_effort'],'low')
+        self.assertNotIn('store',body)
+        self.assertNotIn('GROQ_API_KEY',json.dumps(body))
+        with self.assertRaises(AuditError):call_groq({'model':'other-model'})
 
     def test_future_observations_and_activities_are_not_sent(self):
         future=record('account_999999',state='FOUND');future['recorded_at']=FUTURE
@@ -84,15 +105,15 @@ class OpenAIRefinerTests(unittest.TestCase):
     def test_usage_counts_cached_tokens_without_double_counting(self):
         u=usage_of({'usage':dict(prompt_tokens=1000,completion_tokens=100,total_tokens=1100,prompt_tokens_details={'cached_tokens':400})})
         self.assertEqual(u['total_tokens'],1100)
-        self.assertAlmostEqual(u['estimated_cost_usd'],.00018)
+        self.assertAlmostEqual(u['estimated_cost_usd'],.0000898)
 
     def test_quota_error_never_exposes_raw_key_message(self):
         raw=json.dumps({'error':{'code':'insufficient_quota','message':'secret-test-key should never be printed'}}).encode()
-        error=urllib.error.HTTPError('https://api.openai.com',429,'Too many requests',{},io.BytesIO(raw))
-        with patch.dict(os.environ,{'OPENAI_API_KEY':'secret-test-key'}):
+        error=urllib.error.HTTPError('https://api.groq.com',429,'Too many requests',{},io.BytesIO(raw))
+        with patch.dict(os.environ,{'GROQ_API_KEY':'secret-test-key'}):
             with patch('urllib.request.build_opener') as opener:
                 opener.return_value.open.side_effect=error
-                with self.assertRaises(ProviderError) as caught:call_openai({'model':MODEL})
+                with self.assertRaises(ProviderError) as caught:call_groq({'model':MODEL})
         self.assertIn('insufficient_quota',str(caught.exception))
         self.assertNotIn('secret-test-key',str(caught.exception))
 
@@ -101,33 +122,58 @@ class OpenAIRefinerTests(unittest.TestCase):
         status,steps,_=validate_proposal(p,self.engine,self.request,[])
         self.assertEqual((status,steps),('NOT_APPLICABLE',[]))
 
-    def test_only_104_targets_called_and_remaining_rows_preserved(self):
-        root=self.root/'project';data=root/'dataset';data.mkdir(parents=True)
-        _,q=fixture(data)
-        ids=[f'case_{i:04}' for i in range(518)];rows=[];details=[];requests=[]
-        for i,cid in enumerate(ids):
-            requests.append(dict(q,case_id=cid))
-            rows.append(dict(case_id=cid,deletion_status='INCOMPLETE' if i<104 else 'NOT_APPLICABLE',steps_json='[]'))
-            details.append(dict(case_id=cid,fallback=i<104,reason='test missing link',resources=[]))
-        import csv
-        for path,records in [(data/'deletion_requests.csv',requests),(root/'output.csv',rows)]:
-            with path.open('w',newline='') as f:
-                w=csv.DictWriter(f,fieldnames=list(records[0]));w.writeheader();w.writerows(records)
-        (root/'evaluation_runs').mkdir()
-        (root/'evaluation_runs/final_run.json').write_text(json.dumps({'cases':details,'errors':[{'case_id':cid,'error':'test'} for cid in ids[:104]],'fallback_count':104}))
-        (root/'code/evaluation').mkdir(parents=True)
-        (root/'code/evaluation/evaluation_report.md').write_text('Baseline evaluation\n')
+    def test_invalid_phase_operation_and_future_citations_rejected(self):
+        fixture(self.root,[record(state='FOUND')]);self.refresh()
+        _,obs=packet_for(self.engine,self.request,'test')
+        for field,value in [('phase','DELETE'),('operation','ERASE_EVERYTHING'),('evidence_id',123)]:
+            proposal=self.proposal();proposal['steps_json'][0][field]=value
+            with self.assertRaises((AuditError,ValueError)):
+                validate_proposal(proposal,self.engine,self.request,obs)
+        proposal=self.proposal()
+        future=next(step for step in proposal['steps_json'] if step['phase']=='REMEDIATION')
+        future['evidence_id']='evidence_900001'
+        with self.assertRaises(AuditError):validate_proposal(proposal,self.engine,self.request,obs)
+
+    def test_temporary_rate_limit_exposes_only_bounded_metadata(self):
+        error=urllib.error.HTTPError('https://api.groq.com',429,'Rate limit',{'retry-after':'4'},io.BytesIO(b'{"error":{"code":"rate_limit_exceeded","message":"secret"}}'))
+        with patch.dict(os.environ,{'GROQ_API_KEY':'secret'}):
+            with patch('urllib.request.build_opener') as opener:
+                opener.return_value.open.side_effect=error
+                with self.assertRaises(ProviderError) as caught:call_groq({'model':MODEL})
+        self.assertEqual(caught.exception.retry_after,4)
+        self.assertNotIn('secret',str(caught.exception))
+
+    def test_only_fallback_targets_called_and_remaining_rows_preserved(self):
+        root=self.root/'project';ids,rows=build_refinement_project(root,104)
         answer=dict(authorized=True,intent_reason='Delete',resolved=False,reason='Missing proof',deletion_status='INCOMPLETE',steps_json=[])
         response={'id':'offline-test','model':MODEL,'usage':{'prompt_tokens':10,'completion_tokens':10,'total_tokens':20},'choices':[{'finish_reason':'stop','message':{'content':json.dumps(answer)}}]}
-        with patch('refine_openai.call_openai',return_value=response) as mock:
-            with patch('builtins.print'):
+        with patch('refine_groq.call_groq',side_effect=[ProviderError('temporary limit',retry_after=1)]+[response]*104) as mock:
+            with patch('builtins.print'), patch('refine_groq.time.sleep') as sleep:
                 result=refine(root)
                 refine(root)
-            self.assertEqual(mock.call_count,104)
+            self.assertEqual(mock.call_count,105)
+            sleep.assert_called_once_with(2)
             called=[json.loads(c.args[0]['messages'][1]['content'])['request']['case_id'] for c in mock.call_args_list]
-            self.assertEqual(called,ids[:104])
+            self.assertEqual(called,[ids[0]]+ids[:104])
+        self.assertEqual(result['targets'],104)
         self.assertEqual(result['remaining_fallbacks'],104)
         self.assertEqual(read_csv(root/'output.csv'),rows)
+
+    def test_fallback_target_count_is_not_hardcoded(self):
+        root=self.root/'project7';ids,_=build_refinement_project(root,7)
+        answer=dict(authorized=True,intent_reason='Delete',resolved=False,reason='Missing proof',deletion_status='INCOMPLETE',steps_json=[])
+        response={'id':'offline-test','model':MODEL,'usage':{'prompt_tokens':10,'completion_tokens':10,'total_tokens':20},'choices':[{'finish_reason':'stop','message':{'content':json.dumps(answer)}}]}
+        with patch('refine_groq.call_groq',side_effect=[response]*7) as mock, patch('builtins.print'):
+            result=refine(root)
+        self.assertEqual(mock.call_count,7)
+        self.assertEqual(result['targets'],7)
+        self.assertEqual(result['remaining_fallbacks'],7)
+        called=[json.loads(c.args[0]['messages'][1]['content'])['request']['case_id'] for c in mock.call_args_list]
+        self.assertEqual(called,ids[:7])
+        text=(root/'code/evaluation/evaluation_report.md').read_text()
+        self.assertIn('Groq refinement of the 7 fallback cases',text)
+        self.assertNotIn('Groq refinement of the 104 fallback cases',text)
+        self.assertIn('Only the 7 unresolved evaluation cases',(root/'code/evaluation/usage_report.md').read_text())
 
 
 if __name__=='__main__':unittest.main()

@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 ALLOWED={'.py','.md','.txt'}
 
 def package(root=ROOT):
-    files=[root/'README.md',root/'requirements.txt']
+    files=[root/'README.md',root/'requirements.txt',root/'diagnose_unresolved.py',root/'degraded_cases.md']
     files+=sorted(p for p in (root/'code').rglob('*') if p.is_file() and p.suffix in ALLOWED and '__pycache__' not in p.parts)
     files+=sorted((root/'docs').glob('*.md'))
     for required in ['code/evaluation/evaluation_report.md','code/evaluation/usage_report.md']:
