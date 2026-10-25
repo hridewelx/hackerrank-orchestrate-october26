@@ -75,7 +75,7 @@ class ReviewRepairs(unittest.TestCase):
         data,q=fixture(self.root,[record(),record('backup_900001','BACKUP_ARCHIVE','ACTIVE',USER,'backup_service')])
         data['system_activity.csv']=[dict(activity_id='activity_link',event_time=T,event_type='LINK_RESOURCE_IDENTITY',source_system='catalog',target_system='identity_service',resource_id='tombstone_999999',reported_result='SUCCESS',details='Linked to '+EMAIL)]
         fixture(self.root,[record(),record('backup_900001','BACKUP_ARCHIVE','ACTIVE',USER,'backup_service')],data)
-        _,report=run(self.root,self.root/'deletion_requests.csv',self.root/'review.csv',images=False,fallback=True)
+        _,report=run(self.root,self.root/'deletion_requests.csv',self.root/'review.csv',images=False,degraded=True)
         d=report['cases'][0]
         self.assertTrue(d['fallback'])
         self.assertTrue(any(s['operation']=='REPORT_RESTORE_RISK' for s in d.get('partial_steps',[])))
@@ -132,8 +132,24 @@ class ReviewRepairs(unittest.TestCase):
     def test_strict_cli_preserves_existing_output(self):
         fixture(self.root,[]);out=self.root/'output.csv';out.write_text('prior artifact\n')
         cli=Path(__file__).resolve().parents[1]/'main.py'
+        r=subprocess.run([sys.executable,str(cli),'--strict','--dataset',str(self.root),'--output',str(out),'--diagnostics',str(self.root/'diagnostics.json'),'--no-images'],capture_output=True,text=True)
+        self.assertEqual(r.returncode,2)
+        self.assertIn('AUDIT FAILED',r.stderr)
+        self.assertEqual(out.read_text(),'prior artifact\n')
+
+    def test_documented_default_command_writes_output_with_loud_warning(self):
+        # The README documents `code/main.py --no-cache`; that must produce the
+        # 518-row answer, warn loudly on stderr and never claim readiness.
+        fixture(self.root,[]);out=self.root/'output.csv'
+        cli=Path(__file__).resolve().parents[1]/'main.py'
         r=subprocess.run([sys.executable,str(cli),'--dataset',str(self.root),'--output',str(out),'--diagnostics',str(self.root/'diagnostics.json'),'--no-images'],capture_output=True,text=True)
-        self.assertNotEqual(r.returncode,0);self.assertEqual(out.read_text(),'prior artifact\n')
+        self.assertEqual(r.returncode,0,r.stderr)
+        rows=read_csv(out)
+        self.assertEqual([(x['case_id'],x['deletion_status'],x['steps_json']) for x in rows],[('case_900001','INCOMPLETE','[]')])
+        self.assertIn('WARNING: DEGRADED OUTPUT',r.stderr)
+        self.assertIn('1 of 1 cases could not be resolved',r.stderr)
+        self.assertIn('--strict',r.stderr)
+        self.assertTrue((self.root/'degraded_cases.md').exists())
     def audit_with(self,policy,records=None,data=None):
         from ghost_audit.ingest import EvidenceStore
         from ghost_audit.engine import Auditor
@@ -189,17 +205,21 @@ class ReviewRepairs(unittest.TestCase):
         self.assertEqual(status,'INCOMPLETE')
         self.assertIn('marketing_900001',[s['resource_id'] for s in steps])
 
-    def test_allow_degraded_writes_best_effort_without_claiming_readiness(self):
+    def test_degraded_writes_best_effort_without_claiming_readiness(self):
         from unittest.mock import patch
         import main as harness
         fixture(self.root,[])
         with patch.object(harness,'ROOT',self.root):
-            with self.assertRaisesRegex(AuditError,'allow-degraded'):
-                harness.run(self.root,self.root/'deletion_requests.csv',self.root/'output.csv',images=False,fallback=True)
-            rows,report=harness.run(self.root,self.root/'deletion_requests.csv',self.root/'output.csv',images=False,allow_errors=True,allow_degraded=True)
+            rows,report=harness.run(self.root,self.root/'deletion_requests.csv',self.root/'output.csv',images=False,degraded=True)
         self.assertEqual([(r['deletion_status'],r['steps_json']) for r in rows],[('INCOMPLETE','[]')])
         self.assertFalse(report['submission_ready'])
+        self.assertTrue(report['degraded'])
+        self.assertFalse(report['strict'])
         self.assertEqual(report['fallback_count'],1)
+        # The library default stays fail-closed.
+        before=(self.root/'output.csv').read_bytes()
+        with self.assertRaises(AuditError):harness.run(self.root,self.root/'deletion_requests.csv',self.root/'output.csv',images=False)
+        self.assertEqual((self.root/'output.csv').read_bytes(),before)
 
     def test_reference_only_tombstone_screen_establishes_deleted_account(self):
         from PIL import Image, ImageDraw, ImageFont

@@ -5,16 +5,19 @@
 The current code was run over all 518 evaluation requests:
 
 ```sh
-.venv/bin/python code/main.py --allow-degraded --dataset dataset \
-  --output output.csv --diagnostics evaluation_runs/final_run.json
+.venv/bin/python code/main.py --no-cache
 ```
+
+That is the command the README documents, run with no extra flags: degraded mode is
+the default and `--strict` is the opt-in fail-closed gate.
 
 The run produced 518 unique, lexically sorted rows: 153 `COMPLETE`, 355
 `INCOMPLETE` and 10 `NOT_APPLICABLE`, with **1 unresolved `INCOMPLETE,[]`
 fallback** (`case_63`). Output SHA-256:
-`3c563f871040b1d9c225e7ed1693c420835195a2793bd1b549dc2c181772c844`.
-The run reports `submission_ready: false`; it is a best-effort answer, not a
-strict submission.
+`3c563f871040b1d9c225e7ed1693c420835195a2793bd1b549dc2c181772c844`,
+reproduced byte-for-byte from a clean checkout. The run exits 0, prints the WARNING
+banner and reports `degraded: true` / `submission_ready: false`; it is a best-effort
+answer, not a strict submission.
 
 | Provider/model | Calls | Input tokens | Output tokens | Total tokens | Estimated cost |
 |---|---:|---:|---:|---:|---:|
@@ -25,18 +28,20 @@ No provider usage is inferred from local prompt lengths or code execution.
 No historical Groq proposal was replayed into this run.
 
 Local RapidOCR models: `PP-OCRv6_det_small.onnx`, `PP-OCRv6_rec_small.onnx`,
-`ch_ppocr_mobile_v2.0_cls_mobile.onnx`. The full run used 0 fresh OCR
-invocations and 11 cache hits, producing 3030 observations from 94 evidence files
-in 2.209 seconds. The public-sample run used 0 fresh OCR invocations and 11 cache
-hits. Local inference has no provider token bill; electricity/hardware and
-coding-agent usage are not measured.
+`ch_ppocr_mobile_v2.0_cls_mobile.onnx`. The documented cold run (`--no-cache`) used
+11 fresh OCR invocations and 0 cache hits, producing 3030 observations from 94
+evidence files in 34.672 seconds. The warm-cache run used 0 fresh OCR invocations
+and 11 cache hits and produced the identical SHA-256, so OCR caching changes runtime
+only, not the answer. Local inference has no provider token bill;
+electricity/hardware and coding-agent usage are not measured.
 
 The previous root artifact (SHA-256
 `b2971b3c022f9bbda1b284d03b2320eff2d7df76deb7a713137ee067adc7f710`, 104 fallbacks)
 is preserved at
 `evaluation_runs/repair_session_20261025T1100Z/output_before_allow_degraded.csv`.
-It was superseded by the current `--allow-degraded` run, which still cannot pass
-the strict gate while `case_63` is unresolved.
+It was superseded by the current documented-default run, which still cannot pass
+the strict gate while `case_63` is unresolved (`--strict` exits 2 and preserves the
+file).
 
 ## Historical Groq experiment (separate from this repair session)
 

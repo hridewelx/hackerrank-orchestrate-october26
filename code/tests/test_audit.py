@@ -60,7 +60,7 @@ class AuditTests(unittest.TestCase):
     def test_fallback_preserves_coverage_without_inventing_evidence(self):
         fixture(self.root,[])
         output=self.root/'output.csv';diagnostics=self.root/'diagnostics.json'
-        rows,report=run(self.root,self.root/'deletion_requests.csv',output,images=False,diagnostics=diagnostics,fallback=True)
+        rows,report=run(self.root,self.root/'deletion_requests.csv',output,images=False,diagnostics=diagnostics,degraded=True)
         self.assertEqual(rows,[{'case_id':'case_900001','deletion_status':'INCOMPLETE','steps_json':'[]'}])
         self.assertEqual(report['fallback_count'],1)
         with self.assertRaises(AuditError):validate(output,self.root,diagnostics)
@@ -73,14 +73,14 @@ class AuditTests(unittest.TestCase):
         data,request=fixture(self.root)
         other=dict(request,case_id='case_900002',request_text='Please export my data.')
         data['deletion_requests.csv']=[other,request];fixture(self.root,extra=data)
-        rows,report=run(self.root,self.root/'deletion_requests.csv',self.root/'output.csv',images=False,fallback=True)
+        rows,report=run(self.root,self.root/'deletion_requests.csv',self.root/'output.csv',images=False,degraded=True)
         self.assertEqual([r['case_id'] for r in rows],['case_900001','case_900002'])
         self.assertEqual([r['deletion_status'] for r in rows],['COMPLETE','NOT_APPLICABLE'])
         self.assertEqual(report['fallback_count'],0)
 
     def test_fallback_does_not_mask_extraction_failures(self):
         fixture(self.root);(self.root/'evidence/observations.json').write_text('{"unknown":[]}')
-        with self.assertRaises(AuditError):run(self.root,self.root/'deletion_requests.csv',self.root/'output.csv',images=False,fallback=True)
+        with self.assertRaises(AuditError):run(self.root,self.root/'deletion_requests.csv',self.root/'output.csv',images=False,degraded=True)
         self.assertFalse((self.root/'output.csv').exists())
 
     def test_dotenv_loads_local_key_without_overwriting_environment(self):

@@ -1316,3 +1316,53 @@ repo_root=/home/hridewelx/HackerRank Orchestrate - October 2026
 worktree=/home/hridewelx/HackerRank Orchestrate - October 2026
 parent_agent=none
 
+## [2026-10-25T09:16:21Z] Documented CLI default, false-COMPLETE audit, packaging and key scan
+
+User Prompt (verbatim, secrets redacted):
+1) Make the README's documented run command produce output.csv (default degraded
+   with a loud warning, strict behind --strict). 2) Independent false-COMPLETE audit:
+   for every COMPLETE row, search all evidence with captured_at <= audit_at for the
+   subject's current+historical emails, hashes and phones; list hits not accounted
+   for by a step; do not change any logic unless hits show a real defect, then add a
+   regression test. 3) Update evaluation_report.md: three-policy table, 22/32 baseline,
+   waiver chosen on the same 32 samples, five gains from one shared evidence file,
+   lexical sort choice, case_63 as a degraded fallback. 4) Rebuild code.zip, verify
+   the listing, and reproduce SHA 3c563f87... from a clean temp dir. 5) Grep repo,
+   log.txt and the unzipped zip for the Groq key; report counts only, never the value.
+
+Agent Response Summary:
+Changed the CLI contract so the command the README documents (code/main.py --no-cache)
+writes the 518-row output.csv by default in degraded mode, printing a WARNING banner
+with the unresolved count, while --strict keeps the fail-closed gate that exits 2 and
+preserves the prior file. Wrote an independent read-only false-COMPLETE audit that
+re-derives every COMPLETE row from identity knowledge and raw evidence, found 0
+unaccounted records and 0 state conflicts across 153 rows (after fixing the audit's
+own substring matcher, which had matched user_42 inside user_428), and verified with a
+negative control that removing one verification step is detected. No solution logic
+was changed because no real defect was found. Regenerated the root artifact with the
+documented command, confirmed the output SHA is unchanged, rewrote the evaluation
+narrative with the three-policy table, 22/32 baseline, the one-shared-evidence-file
+caveat, the lexical-sort rationale and case_63 as the degraded fallback, made the
+evaluator preserve hand-written narrative across runs, rebuilt and listed code.zip,
+reproduced the hash from a clean directory with no .env or cache, and scanned the
+repo, log and unzipped archive for the credential key (counts only).
+
+Actions:
+* Edited `code/main.py` (degraded default, `--strict` gate, `warning_banner`, flags in diagnostics)
+* Added `code/audit_complete.py` (independent false-COMPLETE audit, exits 1 on findings)
+* Added `test_documented_default_command_writes_output_with_loud_warning`, updated degraded/strict CLI tests (70/70 pass)
+* Regenerated root `output.csv` with `python code/main.py --no-cache` (SHA-256 3c563f87..., 1 unresolved, `submission_ready: false`)
+* Ran false-COMPLETE audit: 153 rows, 310 accounted hits, 0 unaccounted, 0 conflicts; negative control caught 1
+* Reproduced the SHA from `/tmp/opencode/repro` (clean copy, no .env, no cache, cold OCR)
+* Rebuilt `code.zip` (33 files, no dataset/.env/.venv/zip, SHA-256 fe8323c7...)
+* Key scan: repo 1 occurrence in gitignored `.env` only, log.txt 0, unzipped zip 0, git history 0
+* Updated README.md, IMPLEMENTATION_REVIEW.md, code/evaluation/evaluation_report.md, code/evaluation/usage_report.md, docs/evidence_gaps.md, docs/interview.md, docs/contract_checklist.md, docs/session_report_20261025.md (historical note)
+
+Context:
+tool=opencode
+model=deepseek-v4.1-flash-free
+branch=codex/deletion-audit-agent
+repo_root=/home/hridewelx/HackerRank Orchestrate - October 2026
+worktree=/home/hridewelx/HackerRank Orchestrate - October 2026
+parent_agent=none
+

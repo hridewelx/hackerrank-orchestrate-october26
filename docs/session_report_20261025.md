@@ -1,5 +1,11 @@
 # Session report — best-effort output, coverage waiver, artifact precedence
 
+> **Historical record.** This report documents the earlier session in which
+> `--allow-degraded` was introduced. A later session changed the CLI contract:
+> degraded mode is now the documented default, `--strict` enables the fail-closed
+> gate, and the root `output.csv` is produced by `main.py --no-cache`. The current
+> state is documented in `README.md` and `code/evaluation/evaluation_report.md`.
+
 Date: 2026-10-25. Harness: opencode; model: `deepseek-v4.1-flash-free`.
 No dataset file was modified. No hosted model call was made (0 tokens, $0).
 

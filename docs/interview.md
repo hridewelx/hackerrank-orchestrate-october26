@@ -10,9 +10,16 @@ OCR reads screenshots. Unknown evidence and missing ownership links fail visibly
 
 The pipeline now resolves 517 of 518 rows without a fallback. One case (`case_63`)
 is a conservative INCOMPLETE/empty-step fallback after the catalog claim is
-overridden by the observed artifact, not a proven finding. Do not claim all cases
-are solved, hidden-test accuracy, a language-model investigation loop, or perfect
-OCR.
+overridden by the observed artifact, not a proven finding. The documented command
+therefore writes that file in degraded mode with a warning banner and
+`submission_ready: false`; `--strict` is the fail-closed gate that refuses to write.
+Do not claim all cases are solved, hidden-test accuracy, a language-model
+investigation loop, or perfect OCR.
+
+An independent audit (`code/audit_complete.py`) re-derives every `COMPLETE` row from
+identity knowledge and raw evidence without using the planner: it found 0
+unaccounted subject-linked records and 0 state conflicts across 153 completions, and
+a negative control confirms it catches a deliberately removed verification step.
 
 ## Difficult actual case
 

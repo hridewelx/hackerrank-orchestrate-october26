@@ -77,9 +77,10 @@ Attempted 518; 517 decided; unresolved 1.
 |---|---|
 | case_63 | no grounded resources before cutoff; catalog claim outranked by observed artifact content: marketing_001 shows sj.park@naver.com |
 
-The strict CLI still refuses to write `output.csv` while this case is unresolved.
-The separate `--allow-degraded` run writes all 518 rows with this one row as
-`INCOMPLETE` with `steps_json=[]`, marks the run `submission_ready: false`, and
-writes the same information to `degraded_cases.md`. The 98-case list from the
+The documented default run writes all 518 rows with this one row as `INCOMPLETE`
+with `steps_json=[]`, prints a WARNING banner, marks the run `degraded: true` /
+`submission_ready: false`, and writes the same information to `degraded_cases.md`.
+`--strict` refuses to write anything while this case is unresolved (exit 2, prior
+output byte-identical). The 98-case list from the
 previous build is preserved at
 `evaluation_runs/repair_session_20261025T0520Z/degraded_cases.md`.

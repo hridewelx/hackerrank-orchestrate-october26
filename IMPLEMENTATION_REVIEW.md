@@ -166,16 +166,16 @@ hosted calls.
 |---|---|---|
 | Coverage waiver for exact-key-linked, fully compliant record sets | The old guard returned 97 empty answers even when every attributable record already had its required treatment | `test_retained_only_exact_key_link_permits_grounded_completion`, `test_waiver_requires_compliant_linked_records`, `test_waiver_needs_an_exact_key_not_a_name_or_position` |
 | Observed artifact content outranks a catalog identity claim | `evidence_60` shows `marketing_001` belongs to `sj.park@naver.com`, not to the catalog's claim; the override is recorded instead of aborting the case | `test_catalog_identity_conflict_defers_to_artifact_content`, `test_catalog_claim_kept_when_artifact_content_agrees` |
-| `--allow-degraded` writes the best 518-row answer to root, never claiming readiness | Requested explicit path for a best-effort submission artifact | `test_allow_degraded_writes_best_effort_without_claiming_readiness` |
+| Degraded mode is the documented default (`--strict` opts into the gate) | The README's documented command must produce the 518-row answer | `test_degraded_writes_best_effort_without_claiming_readiness` |
 | Content-step metric added next to the positional metric | `step_no` in the matched tuple makes a correct step at a different index unmatchable | Evaluator reports both for every run |
 
 ### Current measured state
 
-- Tests: **69/69 pass**.
+- Tests: **70/70 pass**.
 - Public sample: **29/32 status (90.62%)**, 8/32 whole-case exact, positional
   P/R/F1 **68.71/58.03/62.92%**, content P/R/F1 **96.93/81.87/88.76%**.
   Always-`INCOMPLETE` baseline is 22/32; the previous build was 24/32.
-- Full run (`--allow-degraded`): 518 rows, **153 `COMPLETE`**, 355 `INCOMPLETE`,
+- Full run (documented default, `main.py --no-cache`): 518 rows, **153 `COMPLETE`**, 355 `INCOMPLETE`,
   10 `NOT_APPLICABLE`, **1 unresolved** (`case_63`), output SHA-256
   `3c563f871040b1d9c225e7ed1693c420835195a2793bd1b549dc2c181772c844`,
   `submission_ready: false`.

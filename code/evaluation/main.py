@@ -145,9 +145,18 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--dataset',type=Path,default=ROOT/'dataset');p.add_argument('--predictions',type=Path);p.add_argument('--report',type=Path,default=ROOT/'code/evaluation/evaluation_report.md');args=p.parse_args()
     run_report={}
     if args.predictions:rows=read_csv(args.predictions)
-    else:rows,run_report=run(args.dataset,args.dataset/'sample_deletion_requests.csv',ROOT/'evaluation_runs/sample_predictions.csv',cache=ROOT/'.cache/ocr',diagnostics=ROOT/'evaluation_runs/sample_run.json',allow_errors=True,fallback=True)
+    else:rows,run_report=run(args.dataset,args.dataset/'sample_deletion_requests.csv',ROOT/'evaluation_runs/sample_predictions.csv',cache=ROOT/'.cache/ocr',diagnostics=ROOT/'evaluation_runs/sample_run.json',degraded=True)
     m=compare(rows,read_csv(args.dataset/'sample_output.csv'))
-    args.report.parent.mkdir(parents=True,exist_ok=True);args.report.write_text(markdown(m,run_report))
+    args.report.parent.mkdir(parents=True,exist_ok=True)
+    text=markdown(m,run_report)
+    begin,end='<!-- metrics:start -->','<!-- metrics:end -->'
+    if args.report.exists() and begin in (existing:=args.report.read_text()) and end in existing:
+        # Refresh only the generated metrics region so participant-authored
+        # analysis and experiment records survive every evaluation run.
+        block=text[text.index('| Metric | Result |'):text.index('## Root causes and iteration')].strip()
+        head,tail=existing.split(begin,1);_,tail=tail.split(end,1)
+        text=f'{head}{begin}\n{block}\n{end}{tail}'
+    args.report.write_text(text)
     (ROOT/'evaluation_runs').mkdir(exist_ok=True);(ROOT/'evaluation_runs/sample_metrics.json').write_text(json.dumps(m,indent=2))
     print(json.dumps({k:v for k,v in m.items() if k!='failures'},indent=2))
 if __name__=='__main__':main()

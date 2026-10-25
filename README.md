@@ -4,14 +4,16 @@ A local AI-assisted deletion-audit implementation with OCR, deterministic eviden
 parsing, historical identity resolution, temporal filtering, policy planning,
 strict serialization and reproducible evaluation. It never executes deletion.
 
-**Current status: one unresolved case blocks a strict submission.**
+**Current status: one unresolved case means the output is degraded, not verified.**
 A full 518-row run produces 153 `COMPLETE`, 355 `INCOMPLETE` and 10
 `NOT_APPLICABLE` decisions, with exactly one conservative `INCOMPLETE` row whose
-`steps_json=[]` (`case_63`, an ownership contradiction). The strict default refuses
-to overwrite root `output.csv` while any case is unresolved; `--allow-degraded`
-writes the same 518 rows explicitly as a best-effort answer and records the run as
-not submission-ready. Root `output.csv` is currently that best-effort artifact.
-See [evaluation](code/evaluation/evaluation_report.md) and
+`steps_json=[]` (`case_63`, an ownership contradiction). The documented command
+therefore writes `output.csv` in degraded mode: the file is complete and
+structurally valid, `degraded_cases.md` names every unresolved case, a loud warning
+is printed on stderr, and the run is reported as `submission_ready: false`.
+`--strict` opts into the fail-closed gate, which exits 2 and preserves the previous
+output instead of writing a best-effort row. Neither mode claims the output is
+verified. See [evaluation](code/evaluation/evaluation_report.md) and
 [evidence gaps](docs/evidence_gaps.md). No hidden accuracy is claimed.
 
 Completed deletions are asserted from the records the subject is linked to by an
@@ -49,8 +51,8 @@ Run from the repository root; paths are resolved relative to the source director
 so another working directory also works:
 
 ```sh
-.venv/bin/python code/main.py --no-cache
-.venv/bin/python code/main.py --allow-degraded
+.venv/bin/python code/main.py --no-cache     # writes output.csv (degraded; warns loudly)
+.venv/bin/python code/main.py --strict       # fail-closed gate; exit 2 unless every case resolves
 .venv/bin/python code/evaluation/main.py
 .venv/bin/python code/evaluation/coverage_experiment.py
 python3 diagnose_unresolved.py . output.csv
@@ -60,15 +62,16 @@ python3 diagnose_unresolved.py . output.csv
 .venv/bin/python code/package.py
 ```
 
-- `main.py` reads `dataset/`, audits all requests, validates every emitted step,
-  and writes root `output.csv` atomically only when every case resolves. The
-  default is strict: unresolved cases abort with exit 2 and preserve the prior
-  output. `--review` writes an explicit degraded review artifact and can never
-  overwrite root `output.csv`. `--allow-degraded` may write root `output.csv` as a
-  best-effort answer; it marks the run `submission_ready: false`, keeps unresolved
-  rows as `INCOMPLETE` with empty steps, and writes `degraded_cases.md` next to the
-  output. Extraction failures remain fatal. Per-case diagnostics identify every
-  fallback.
+- `main.py` reads `dataset/`, audits all requests, validates every emitted step and
+  writes root `output.csv` atomically. **Default:** degraded, so the documented
+  command always produces a 518-row answer. Unresolved cases become `INCOMPLETE`
+  with empty steps, are listed in `degraded_cases.md`, and trigger a WARNING banner
+  on stderr; the run records `degraded: true` and `submission_ready: false`.
+  **`--strict`** requires every case to resolve: unresolved cases abort with exit 2
+  and the prior output is preserved byte-for-byte. `--review` writes the degraded
+  artifact under `evaluation_runs/review/` instead of the root, and
+  `--allow-degraded` is kept as a compatibility alias for the default. Extraction
+  failures remain fatal in every mode. Per-case diagnostics identify every fallback.
 - `validate.py` freshly reconstructs every case from participant evidence and
   compares status, ordered steps, subject, intent, and resources. Empty
   `INCOMPLETE` steps are accepted only with `--allow-degraded`, which marks the
@@ -86,6 +89,7 @@ Useful options:
 
 ```sh
 .venv/bin/python code/main.py --dataset /path/to/dataset --output /path/to/output.csv
+.venv/bin/python code/main.py --strict --output /path/to/output.csv
 .venv/bin/python code/review.py --no-cache
 .venv/bin/python code/main.py --case-sort natural
 ```
@@ -171,7 +175,7 @@ captures. These are not filled using sample answers. Partial output may still
 miss anonymous resources or phone-only links; 517 emitted decisions, one of them an
 unproven fallback, do not mean 517 independently verified correct answers.
 
-The isolated regression suite currently has 69 passing tests covering historical
+The isolated regression suite currently has 70 passing tests covering historical
 identity, decoys, multilingual intent, prerequisites, cutoff leakage, replica
 drift, recreation, retention, tombstones, backup inventory screens, catalog-vs-artifact
 ownership, coverage waivers, hostile SQL, path traversal and input metamorphisms.
@@ -180,9 +184,12 @@ exact sequences at this build, with all fallback cases included in the denominat
 
 ## Artifacts and interview
 
-- `output.csv`: current best-effort 518-row artifact from `--allow-degraded`,
+- `output.csv`: 518-row artifact from the documented default (degraded) command,
   153 `COMPLETE` / 355 `INCOMPLETE` / 10 `NOT_APPLICABLE`, one unresolved row
-  (`case_63`); **not** submission-ready.
+  (`case_63`, listed in `degraded_cases.md`); **not** submission-ready.
+- `code/audit_complete.py`: independent read-only false-COMPLETE audit; re-derives
+  every `COMPLETE` row from identity knowledge and raw evidence and exits 1 on any
+  unaccounted record or state conflict. Current result: 0 and 0 across 153 rows.
 - `code.zip`: runnable source archive and reports.
 - `code/evaluation/evaluation_report.md`: measured metrics and custom scenarios.
 - `code/evaluation/usage_report.md`: current review OCR counts and historical token usage recomputed from actual API responses.

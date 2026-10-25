@@ -40,7 +40,7 @@ was inspected. Sample answers are used only by the evaluation command.
 | Required retention | No deletion; missing required retained resource fails because the operation table supplies no repair operation |
 | Unknown evidence / extraction failure | Fail explicitly; do not synthesize a confident output |
 | AI | Local RapidOCR baseline; explicit Groq openai/gpt-oss-20b refinement restricted to the current unresolved fallbacks, with dynamic target count, usage accounting and evidence validation |
-| Unresolved cases | Strict default refuses output on unresolved cases. Explicit `--review` writes a separate review artifact; explicit `--allow-degraded` may write root `output.csv` as a best-effort answer, keeps unresolved rows as INCOMPLETE with empty steps, writes `degraded_cases.md`, and reports `submission_ready: false`. Neither is an evidence-backed finding. Extraction failures remain fatal. `code/review.py` still produces partial review artifacts |
+| Unresolved cases | The documented default is degraded: it writes root `output.csv`, keeps unresolved rows as INCOMPLETE with empty steps, writes `degraded_cases.md`, prints a WARNING banner, and reports `degraded: true` / `submission_ready: false`. `--strict` is the opt-in fail-closed gate (exit 2, prior output preserved); `--review` writes the degraded artifact under the review directory. None of these is an evidence-backed finding. Extraction failures remain fatal. `code/review.py` still produces partial review artifacts |
 | Transcripts | log.txt is append-only summary; agent-trace.zip is separate raw-session export after quitting Codex |
 
 ## Official event check
